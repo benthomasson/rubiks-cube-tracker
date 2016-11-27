@@ -20,21 +20,12 @@ S1, S2 = cv.GetSize(frame)
 den = 2
 
 sg = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-sg2 = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-sg3 = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-sg4 = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-sg5 = cv.CreateImage((S1 / den, S2 / den), 8, 3)
 sgc = cv.CreateImage((S1 / den, S2 / den), 8, 3)
 hsv = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-dst = cv.CreateImage((S1 / den, S2 / den), 8, 1)
 dst2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
 d = cv.CreateImage((S1 / den, S2 / den), cv.IPL_DEPTH_16S, 1)
 d2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-d3 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
 b = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-b4 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-both = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-harr = cv.CreateImage((S1 / den, S2 / den), 32, 1)
 
 W, H = S1 / den, S2 / den
 lastdetected = 0
@@ -329,7 +320,7 @@ if __name__ == '__main__':
     logging.addLevelName(logging.WARNING, "\033[91m%s\033[0m" % logging.getLevelName(logging.WARNING))
 
     succ = 0  # number of frames in a row that we were successful in finding the outline
-    tracking = 0
+    tracking = False
     win_size = 5
     flags = 0
     detected = 0
@@ -341,9 +332,7 @@ if __name__ == '__main__':
 
     ff = cv.InitFont(cv.CV_FONT_HERSHEY_PLAIN, 1, 1, shear=0, thickness=1, lineType=8)
 
-    counter = 0  # global iteration counter
     undetectednum = 100
-    stage = 1  # 1: learning colors
     extract = False
     selected = 0
     colors = [[] for i in range(6)]
@@ -354,8 +343,14 @@ if __name__ == '__main__':
         assigned[i][4] = i
 
     didassignments = False
-    # orange green red blue yellow white. Used only for visualization purposes
-    mycols = [(0, 127, 255), (20, 240, 20), (0, 0, 255), (200, 0, 0), (0, 255, 255), (255, 255, 255)]
+
+    # Used only for visualization purposes
+    mycols = [(0, 127, 255),   # orange
+              (20, 240, 20),   # green
+              (0, 0, 255),     # red
+              (200, 0, 0),     # blue
+              (0, 255, 255),   # yellow
+              (255, 255, 255)] # white
 
     while True:
         frame = cv.QueryFrame(capture)
@@ -373,7 +368,7 @@ if __name__ == '__main__':
         # cv.EqualizeHist(grey,grey)
 
         # tracking mode
-        if tracking > 0:
+        if tracking:
 
             detected = 2
 
@@ -389,28 +384,28 @@ if __name__ == '__main__':
             features = [p for (st, p) in zip(status, features) if st]
 
             if len(features) < 4:
-                tracking = 0  # we lost it, restart search
+                tracking = False  # we lost it, restart search
             else:
                 # make sure that in addition the distances are consistent
                 ds1 = ptdst(features[0], features[1])
                 ds2 = ptdst(features[2], features[3])
 
                 if max(ds1, ds2) / min(ds1, ds2) > 1.4:
-                    tracking = 0
+                    tracking = False
 
                 ds3 = ptdst(features[0], features[2])
                 ds4 = ptdst(features[1], features[3])
 
                 if max(ds3, ds4) / min(ds3, ds4) > 1.4:
-                    tracking = 0
+                    tracking = False
 
                 if ds1 < 10 or ds2 < 10 or ds3 < 10 or ds4 < 10:
-                    tracking = 0
-                if tracking == 0:
+                    tracking = False
+                if not tracking:
                     detected = 0
 
         # detection mode
-        if tracking == 0:
+        if not tracking:
             detected = 0
             cv.Smooth(grey, dst2, cv.CV_GAUSSIAN, 3)
             cv.Laplace(dst2, d)
@@ -552,7 +547,6 @@ if __name__ == '__main__':
 
                 dd = 1.7 * dd
                 evidence = 0
-                totallines = 0
 
                 # cv.Line(sg,p,p2,(0,255,0))
                 # cv.Line(sg,p,p1,(0,255,0))
@@ -681,7 +675,7 @@ if __name__ == '__main__':
                     #(cv.CV_TERMCRIT_ITER | cv.CV_TERMCRIT_EPS,
                     # 20, 0.03))
                     features = pt
-                    tracking = 1
+                    tracking = True
                     succ = 0
 
         else:
@@ -744,7 +738,6 @@ if __name__ == '__main__':
             p0 = (pt[0][0], pt[0][1])
 
             ep = []
-            midpts = []
             i = 1
             j = 5
             for k in range(9):
@@ -765,13 +758,11 @@ if __name__ == '__main__':
                     # valavg=val[int(p[1]-rad/3):int(p[1]+rad/3),int(p[0]-rad/3):int(p[0]+rad/3)]
                     # mask=cv.CreateImage(cv.GetDims(valavg), 8, 1 )
 
-                    col = cv.Avg(
-                        sgc[int(p[1] - rad / den):int(p[1] + rad / den),
-                            int(p[0] - rad / den):int(p[0] + rad / den)])
+                    col = cv.Avg(sgc[int(p[1] - rad / den):int(p[1] + rad / den),
+                                     int(p[0] - rad / den):int(p[0] + rad / den)])
 
-                    col = cv.Avg(
-                        sgc[int(p[1] - rad / den):int(p[1] + rad / den),
-                            int(p[0] - rad / den):int(p[0] + rad / den)])
+                    col = cv.Avg(sgc[int(p[1] - rad / den):int(p[1] + rad / den),
+                                     int(p[0] - rad / den):int(p[0] + rad / den)])
 
                     p_int = (int(p[0]), int(p[1]))
                     cv.Circle(sg, p_int, int(rad), col, -1)
@@ -781,12 +772,10 @@ if __name__ == '__main__':
                     else:
                         cv.Circle(sg, p_int, int(rad), (255, 255, 255), 2)
 
-                    hueavg = cv.Avg(
-                        hue[int(p[1] - rad / den):int(p[1] + rad / den),
-                            int(p[0] - rad / den):int(p[0] + rad / den)])
-                    satavg = cv.Avg(
-                        sat[int(p[1] - rad / den):int(p[1] + rad / den),
-                            int(p[0] - rad / den):int(p[0] + rad / den)])
+                    hueavg = cv.Avg(hue[int(p[1] - rad / den):int(p[1] + rad / den),
+                                        int(p[0] - rad / den):int(p[0] + rad / den)])
+                    satavg = cv.Avg(sat[int(p[1] - rad / den):int(p[1] + rad / den),
+                                        int(p[0] - rad / den):int(p[0] + rad / den)])
 
                     cv.PutText(sg, repr(int(hueavg[0])), (p_int[0] + 70, p_int[1]), ff, (255, 255, 255))
                     cv.PutText(sg, repr(int(satavg[0])), (p_int[0] + 70, p_int[1] + 10), ff, (255, 255, 255))
@@ -845,8 +834,6 @@ if __name__ == '__main__':
 
         # cv.Smooth(sg,sg,cv.CV_GAUSSIAN, 5)
         cv.ShowImage("Fig", sg)
-
-        counter += 1  # global counter
 
         # handle events
         c = cv.WaitKey(10) % 0x100
