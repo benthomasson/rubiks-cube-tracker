@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python2
 
 import argparse
 import cv
@@ -14,6 +14,13 @@ from random import randrange
 from pprint import pformat
 
 log = logging.getLogger(__name__)
+
+
+# To capture a single png from the webcam
+# fswebcam --device /dev/video0 --no-timestamp --no-title --no-subtitle --no-banner --no-info -r 640x480 --png 3 image.png
+
+# To convert a jpg to png
+# mogrify -format png *.jpg
 
 
 def intersect_seg(x1, x2, x3, x4, y1, y2, y3, y4):
@@ -207,7 +214,7 @@ class RubiksFinder(object):
         self.b = cv.CreateImage((self.width, self.height), 8, 1)
 
         self.lastdetected = 0
-        self.THR = 100
+        self.THR = 70
         self.dects = 50  # ideal number of number of lines detections
 
         self.hue = cv.CreateImage((self.width, self.height), 8, 1)
@@ -254,12 +261,8 @@ class RubiksFinder(object):
 
     def analyze_frame(self, frame):
         cv.Resize(frame, self.sg)
-        # cv.EqualizeHist(val, val)
-        # cv.Merge(hue,sat,val,None,sg2)
-        # cv.CvtColor(sg2,sg,cv.CV_HSV2RGB)
         cv.Copy(self.sg, self.sgc)
         cv.CvtColor(self.sg, self.grey, cv.CV_RGB2GRAY)
-        # cv.EqualizeHist(grey,grey)
 
         # tracking mode
         if self.tracking:
@@ -272,8 +275,6 @@ class RubiksFinder(object):
         if self.tracking:
             # we are in tracking mode, we need to fill in pt[] array
             # calculate the pt array for drawing from features
-            # for p in features:
-            #    cv.Circle(sg, p, 3, (255,255,255),-1)
             p = self.features[0]
             p1 = self.features[1]
             p2 = self.features[2]
@@ -300,11 +301,8 @@ class RubiksFinder(object):
         self.prev_grey, self.grey = self.grey, self.prev_grey
         self.prev_pyramid, self.pyramid = self.pyramid, self.prev_pyramid
 
-        # draw img
-        # cv.CvtColor(sg,sg2,cv.CV_RGB2HSV)
-        # cv.Split(sg2, hue, sat, val, None)
-        # cv.Smooth(sg,sg,cv.CV_GAUSSIAN, 5)
-        cv.ShowImage("Fig", self.sg)
+        # Display a circle around each detected square (this bars on EV3)
+        # cv.ShowImage("Fig", self.sg)
 
     def verify_still_tracking(self):
         self.detected = 2
@@ -375,7 +373,7 @@ class RubiksFinder(object):
                 a += pi
             angs.append(a)
 
-        log.debug("angles: %s" % pformat(angs))
+        # log.info("THR %d, lastdetected %d, dects %d, houghlines %d, angles: %s" % (self.THR, self.lastdetected, self.dects, len(self.li), pformat(angs)))
 
         # lets look for lines that share a common end point
         t = 10
@@ -551,12 +549,11 @@ class RubiksFinder(object):
                 # cv.Line(sg,q1,q2,(0,255,255))
                 evidence += 1
 
-            # print evidence
             res.append((evidence, (p, p1, p2)))
 
         minch = 10000
         res.sort(reverse=True)
-        # print [a[0] for a in res]
+        # log.info("dects %s, res:\n%s" % (self.dects, pformat(res)))
 
         if len(res) > 0:
             minps = []
@@ -584,13 +581,16 @@ class RubiksFinder(object):
                           self.prevface[2][1] + self.prevface[1][1] - self.prevface[0][1])
                     tc = (self.prevface[0], self.prevface[1], self.prevface[2], p3)
                     ch = compfaces(w, tc)
+
+                    # log.info("ch %s, minch %s" % (ch, minch))
                     if ch < minch:
                         minch = ch
                         minps = (p, p1, p2)
 
+            # log.info("minch %d, minps:\n%s" % (minch, pformat(minps)))
+
             if len(minps) > 0:
                 self.prevface = minps
-                # print minch
 
                 if minch < 10:
                     # good enough!
@@ -602,9 +602,11 @@ class RubiksFinder(object):
             else:
                 self.succ = 0
 
+            # log.info("succ %d\n\n" % self.succ)
+
             # we matched a few times same grid
             # coincidence? I think NOT!!! Init LK tracker
-            if self.succ > 2 and 1:
+            if self.succ > 2:
 
                 # initialize features for LK
                 pt = []
@@ -612,13 +614,6 @@ class RubiksFinder(object):
                     for j in [1.0 / 3, 2.0 / 3]:
                         pt.append((self.p0[0] + i * self.v1[0] + j * self.v2[0], self.p0[1] + i * self.v1[1] + j * self.v2[1]))
 
-                # refine points slightly
-                # features = cv.FindCornerSubPix (
-                # grey,
-                # pt,
-                #(win_size, win_size),  (-1, -1),
-                #(cv.CV_TERMCRIT_ITER | cv.CV_TERMCRIT_EPS,
-                # 20, 0.03))
                 self.features = pt
                 self.tracking = True
                 self.succ = 0
@@ -711,7 +706,6 @@ class RubiksFinder(object):
                     cs.append(col)
                     hsvcs.append((hueavg[0], satavg[0]))
 
-        # dwalton - self.extract is checked here and above
         if self.extract:
             self.extract = False
             self.colors[self.selected] = cs
@@ -763,7 +757,6 @@ class RubiksFinder(object):
         # assign all colors
         bestj = 0
         besti = 0
-        bestcon = 0
         matchesto = 0
         bestd = 10001
         taken = [0 for i in range(6)]
@@ -820,12 +813,11 @@ class RubiksFinder(object):
                             # this sticker is forced! Terminate search
                             # for better matches
                             forced = True
-                            print 'sticker', (i, j), 'had color forced!'
+                            log.info('sticker (%s, %s) had color forced!' % (i, j))
 
             # assign it
             done = done + 1
 
-            # print matchesto,bestd
             self.assigned[bestj][besti] = matchesto
 
             op = opposite[matchesto]  # get the opposite side
@@ -903,7 +895,7 @@ class RubiksFinder(object):
                 log.info("dodetection is now %s" % self.dodetection)
 
             elif cc == 'q':
-                print self.hsvs
+                print(self.hsvs)
 
             elif cc == 'p':
                 log.info("extract colors")
@@ -929,9 +921,12 @@ def analyze_file(filename):
 
     (S1, S2) = cv.GetSize(img)
     rf = RubiksFinder(S1, S2)
+    display_window = False
 
-    cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
-    cv.ResizeWindow("Fig", rf.width, rf.height)
+    if display_window:
+        cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
+        cv.ResizeWindow("Fig", rf.width, rf.height)
+
     ATTEMPTS = 100
     rf.extract = True
 
@@ -947,13 +942,15 @@ def analyze_file(filename):
             #           pformat(rf.colors),
             #           pformat(rf.hsvs)))
 
-            # cv.ShowImage('foobar', img)
-            # cv.WaitKey(0)
+            if display_window:
+                cv.ShowImage('foobar', img)
+                cv.WaitKey(0)
             break
     else:
         raise Exception("Could not find the cube in %s" % filename)
 
-    cv.DestroyWindow("Fig")
+    if display_window:
+        cv.DestroyWindow("Fig")
     colors = rf.colors[0]
     colors_final = []
 
@@ -969,7 +966,7 @@ def analyze_file(filename):
 
 
 def analyze_webcam(width, height):
-    print """
+    print("""
     ' ' : extract colors of detected face
     'b' : toggle onlyBlackCubes
     'd' : toggle dodetection
@@ -980,8 +977,7 @@ def analyze_webcam(width, height):
     'p' : resolve colors
     'u' : toggle didassignments
     's' : save image
-
-"""
+""")
 
     # 0 for laptop camera
     # 1 for usb camera
@@ -996,10 +992,6 @@ def analyze_webcam(width, height):
     cv.ResizeWindow("Fig", width, height)
 
     frame = cv.QueryFrame(capture)
-
-    # should be able to pass (width, height) here instead?
-    # S1, S2 = cv.GetSize(frame)
-    # rf = RubiksFinder(S1, S2)
     rf = RubiksFinder(width, height)
 
     while True:
@@ -1020,16 +1012,17 @@ def analyze_webcam(width, height):
 if __name__ == '__main__':
     '''
     Notes on resolutions
+    352x240  : The default, this is what runs smoothly on EV3
     640x480  : what this program used originally
-    800x600  : highest I can use so far that works smoothly...this is the default
+    800x600  : highest I can use (on my laptop) far that works smoothly
     1024x768 : works but takes a second to get going
     1280x720 : max for my camera, takes too much cpu
     '''
     logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)7s %(filename)12s: %(message)s')
     parser = argparse.ArgumentParser("Find a Rubiks cube in an image or video feed")
-    parser.add_argument("--width", default=800, type=int)
-    parser.add_argument("--height", default=600, type=int)
+    parser.add_argument("--width", default=352, type=int)
+    parser.add_argument("--height", default=240, type=int)
     parser.add_argument("-f", "--filename", type=str)
 
     args = parser.parse_args()
@@ -1041,6 +1034,6 @@ if __name__ == '__main__':
 
     if args.filename:
         rgb_all_squares = analyze_file(args.filename)
-        print json.dumps(rgb_all_squares, indent=4)
+        print(json.dumps(rgb_all_squares, indent=4))
     else:
         analyze_webcam(args.width, args.height)
