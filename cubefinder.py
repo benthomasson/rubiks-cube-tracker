@@ -242,6 +242,7 @@ class RubiksFinder(object):
         self.extract = False
         self.selected = 0
         self.colors = [[] for i in range(6)]
+        self.center_pixels = [[] for i in range(6)]
         self.hsvs = [[] for i in range(6)]
         self.assigned = [[-1 for i in range(9)] for j in range(6)]
 
@@ -362,7 +363,6 @@ class RubiksFinder(object):
             self.THR = max(2, self.THR - 1)
 
         self.li = cv.HoughLines2(self.d2, cv.CreateMemStorage(), cv.CV_HOUGH_PROBABILISTIC, 1, 3.1415926 / 45, self.THR, 10, 5)
-        # self.li = cv2.HoughLinesP(numpy.asarray(self.d2, dtype="int32" ), 1, 3.1415926 / 45, self.THR, 10, 5)
 
         # store angles for later
         angs = []
@@ -671,6 +671,7 @@ class RubiksFinder(object):
 
         rad = ptdst(self.v1, (0.0, 0.0)) / 6.0
         cs = []
+        center_pixels = []
         hsvcs = []
         den = 2
 
@@ -704,11 +705,13 @@ class RubiksFinder(object):
 
                 if self.extract:
                     cs.append(col)
+                    center_pixels.append(p_int)
                     hsvcs.append((hueavg[0], satavg[0]))
 
         if self.extract:
             self.extract = False
             self.colors[self.selected] = cs
+            self.center_pixels[self.selected] = center_pixels
             self.hsvs[self.selected] = hsvcs
             self.selected = min(self.selected + 1, 5)
 
@@ -918,14 +921,7 @@ def analyze_file(filename):
     Assuming filename is a png that contains a rubiks cube, return
     the RGB values for all 9 squares
     """
-    for x in range(10):
-        try:
-            img = cv.LoadImage(filename)
-            break
-        except IOError as e:
-            sleep(1)
-    else:
-        raise e
+    img = cv.LoadImage(filename)
 
     (S1, S2) = cv.GetSize(img)
     rf = RubiksFinder(S1, S2)
@@ -959,16 +955,29 @@ def analyze_file(filename):
 
     if display_window:
         cv.DestroyWindow("Fig")
+
+    # When analyzing a file we are only examining one side so use index 0 for colors and center_pixels
     colors = rf.colors[0]
+    center_pixels = rf.center_pixels[0]
     colors_final = []
+    # log.warning("rf.colors\n %s" % pformat(rf.colors))
+    # log.warning("rf.center_pixels\n%s" % pformat(rf.center_pixels))
+    # log.warning("colors\n %s" % pformat(colors))
+    # log.warning("center_pixels\n%s" % pformat(center_pixels))
 
     # opencv returns BGR, not RGB
     # http://docs.opencv.org/3.0-beta/doc/py_tutorials/py_core/py_basic_ops/py_basic_ops.html#basic-ops
-    for (blue, green, red, _) in colors:
+    for ((x, y), (blue, green, red, _)) in zip(center_pixels, colors):
 
         # Save in RGB, this makes the colors much easier to print on a web page
         # for troubleshooting, it is also the format expected by rubiks_rgb_solver.py
-        colors_final.append((int(red), int(green), int(blue)))
+        colors_final.append({
+            'x' : x, 
+            'y' : y, 
+            'red': int(red),
+            'green' : int(green),
+            'blue' : int(blue)
+        })
 
     return colors_final
 
@@ -1032,7 +1041,6 @@ if __name__ == '__main__':
     parser.add_argument("--width", default=352, type=int)
     parser.add_argument("--height", default=240, type=int)
     parser.add_argument("-f", "--filename", type=str)
-    parser.add_argument("-d", "--daemon", action='store_true')
 
     args = parser.parse_args()
     log = logging.getLogger(__name__)
@@ -1044,19 +1052,6 @@ if __name__ == '__main__':
     if args.filename:
         rgb_all_squares = analyze_file(args.filename)
         print(json.dumps(rgb_all_squares, indent=4))
-
-    elif args.daemon:
-        log.info("running in daemon mode")
-        png_filename = '/tmp/rubiks_scan.png'
-        json_filename = '/tmp/rubiks_scan.json'
-
-        while True:
-            if os.path.exists(png_filename) and not os.path.exists(json_filename):
-                log.info("Analyze %s" % png_filename)
-                rgb_all_squares = analyze_file(png_filename)
-                with open(json_filename, 'w') as fh:
-                    json.dump(rgb_all_squares, fh)
-            sleep(0.1)
 
     else:
         analyze_webcam(args.width, args.height)
