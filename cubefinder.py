@@ -13,35 +13,6 @@ from pprint import pformat
 
 log = logging.getLogger(__name__)
 
-capture = cv.CreateCameraCapture(0)
-cv.NamedWindow("Fig", 1)
-frame = cv.QueryFrame(capture)
-S1, S2 = cv.GetSize(frame)
-den = 2
-
-sg = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-sgc = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-hsv = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-dst2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-d = cv.CreateImage((S1 / den, S2 / den), cv.IPL_DEPTH_16S, 1)
-d2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-b = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-
-W, H = S1 / den, S2 / den
-lastdetected = 0
-THR = 100
-dects = 50  # ideal number of number of lines detections
-
-hue = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-sat = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-val = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-
-# stores the coordinates that make up the face. in order: p,p1,p3,p2 (i.e.) counterclockwise winding
-prevface = [(0, 0), (5, 0), (0, 5)]
-dodetection = True
-
-onlyBlackCubes = False
-
 
 def intersect_seg(x1, x2, x3, x4, y1, y2, y3, y4):
     den = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1)
@@ -219,6 +190,9 @@ def neighbors(f, s):
 
 
 def processColors(useRGB=True):
+    """
+    User hits the letter p, assign a color to each square
+    """
     global assigned, didassignments
 
     # assign all colors
@@ -297,8 +271,12 @@ def processColors(useRGB=True):
         # also corners have 2 neighbors. Also remove possibilities
         # of edge/corners made up of opposite sides
         ns = neighbors(bestj, besti)
+        log.info("processColors: poss %s" % pformat(poss))
+        log.info("processColors: ns %s" % pformat(ns))
+
         for neighbor in ns:
             p = poss[neighbor]
+
             if matchesto in p:
                 p.remove(matchesto)
             if op in p:
@@ -310,7 +288,6 @@ def processColors(useRGB=True):
 
 
 if __name__ == '__main__':
-
     logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(levelname)7s %(filename)12s: %(message)s')
     log = logging.getLogger(__name__)
@@ -318,6 +295,62 @@ if __name__ == '__main__':
     # Color the errors and warnings in red
     logging.addLevelName(logging.ERROR, "\033[91m  %s\033[0m" % logging.getLevelName(logging.ERROR))
     logging.addLevelName(logging.WARNING, "\033[91m%s\033[0m" % logging.getLevelName(logging.WARNING))
+
+    # 0 for laptop camera
+    # 1 for usb camera
+    capture = cv.CreateCameraCapture(1)
+
+    # default
+    WIDTH = 640
+    HEIGHT = 480
+
+    # max for my camera...takes too much cpu
+    WIDTH = 1280
+    HEIGHT = 720
+
+    # works but takes a second to get going
+    WIDTH = 1024
+    HEIGHT = 768
+
+    # works
+    WIDTH = 800
+    HEIGHT = 600
+
+    # Set the capture resolution
+    cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_WIDTH, WIDTH)
+    cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_HEIGHT, HEIGHT)
+
+    cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
+    # Set the window size to match the capture resolution
+    cv.ResizeWindow("Fig", WIDTH, HEIGHT)
+
+    frame = cv.QueryFrame(capture)
+    S1, S2 = cv.GetSize(frame)
+
+    log.info("size: %s %s" % (S1, S2))
+    den = 2
+
+    sg = cv.CreateImage((S1 / den, S2 / den), 8, 3)
+    sgc = cv.CreateImage((S1 / den, S2 / den), 8, 3)
+    hsv = cv.CreateImage((S1 / den, S2 / den), 8, 3)
+    dst2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
+    d = cv.CreateImage((S1 / den, S2 / den), cv.IPL_DEPTH_16S, 1)
+    d2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
+    b = cv.CreateImage((S1 / den, S2 / den), 8, 1)
+
+    W, H = S1 / den, S2 / den
+    lastdetected = 0
+    THR = 100
+    dects = 50  # ideal number of number of lines detections
+
+    hue = cv.CreateImage((S1 / den, S2 / den), 8, 1)
+    sat = cv.CreateImage((S1 / den, S2 / den), 8, 1)
+    val = cv.CreateImage((S1 / den, S2 / den), 8, 1)
+
+    # stores the coordinates that make up the face. in order: p,p1,p3,p2 (i.e.) counterclockwise winding
+    prevface = [(0, 0), (5, 0), (0, 5)]
+    dodetection = True
+    onlyBlackCubes = False
 
     succ = 0  # number of frames in a row that we were successful in finding the outline
     tracking = False
@@ -359,6 +392,7 @@ if __name__ == '__main__':
             cv.WaitKey(0)
             break
 
+        # log.info("processing frame")
         cv.Resize(frame, sg)
         # cv.EqualizeHist(val, val)
         # cv.Merge(hue,sat,val,None,sg2)
@@ -404,6 +438,7 @@ if __name__ == '__main__':
                 if not tracking:
                     detected = 0
 
+        # dwalton guts starts here
         # detection mode
         if not tracking:
             detected = 0
@@ -678,6 +713,7 @@ if __name__ == '__main__':
                     tracking = True
                     succ = 0
 
+        # dwalton - end of guts here
         else:
             # we are in tracking mode, we need to fill in pt[] array
             # calculate the pt array for drawing from features
@@ -696,6 +732,7 @@ if __name__ == '__main__':
 
             prevface = [pt[0], pt[1], pt[2]]
 
+        # dwalton - start of drawing circles/lines
         # use pt[] array to do drawing
         if (detected or undetectednum < 1) and dodetection:
 
@@ -789,7 +826,9 @@ if __name__ == '__main__':
                 colors[selected] = cs
                 hsvs[selected] = hsvcs
                 selected = min(selected + 1, 5)
+        # dwalton - end of drawing circles/lines
 
+        # dwalton - this runs if you hit spacebar to extract
         # draw faces of the extracted cubes
         x = 20
         y = 20
@@ -835,6 +874,7 @@ if __name__ == '__main__':
         # cv.Smooth(sg,sg,cv.CV_GAUSSIAN, 5)
         cv.ShowImage("Fig", sg)
 
+        # dwalton - process keyboard input
         # handle events
         c = cv.WaitKey(10) % 0x100
 
@@ -847,9 +887,11 @@ if __name__ == '__main__':
 
             # EXTRACT COLORS!!!
             if cc == ' ':
+                log.info("extract colors")
                 extract = True
 
-            if cc == 'r':
+            elif cc == 'r':
+                log.info("reset")
                 # reset
                 extract = False
                 selected = 0
@@ -860,32 +902,41 @@ if __name__ == '__main__':
                     assigned[i][4] = i
                 didassignments = False
 
-            if cc == 'n':
+            elif cc == 'n':
+                log.info("n - shift left")
                 selected = selected - 1
+
                 if selected < 0:
                     selected = 5
-            if cc == 'm':
+
+            elif cc == 'm':
+                log.info("m - shift left")
                 selected = selected + 1
+
                 if selected > 5:
                     selected = 0
 
-            if cc == 'b':
+            elif cc == 'b':
                 onlyBlackCubes = not onlyBlackCubes
+                log.info("onlyBlackCubes is now %s" % onlyBlackCubes)
 
-            if cc == 'd':
+            elif cc == 'd':
                 dodetection = not dodetection
+                log.info("dodetection is now %s" % dodetection)
 
-            if cc == 'q':
+            elif cc == 'q':
                 print hsvs
 
-            if cc == 'p':
-                # process!!!!
+            elif cc == 'p':
+                log.info("extract colors")
                 processColors()
 
-            if cc == 'u':
+            elif cc == 'u':
                 didassignments = not didassignments
+                log.info("didetection is now %s" % didetection)
 
-            if cc == 's':
-                cv.SaveImage("C:\\code\\img\\pic" + repr(time()) + ".jpg", sgc)
+            elif cc == 's':
+                log.info("save image")
+                cv.SaveImage(repr(time()) + ".jpg", sgc)
 
     cv.DestroyWindow("Fig")
