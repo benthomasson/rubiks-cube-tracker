@@ -2,7 +2,6 @@
 
 import argparse
 import cv
-import cv2
 import json
 import logging
 import os
@@ -21,6 +20,7 @@ log = logging.getLogger(__name__)
 # To convert a jpg to png
 # mogrify -format png *.jpg
 
+display_window = True
 
 def intersect_seg(x1, x2, x3, x4, y1, y2, y3, y4):
     den = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1)
@@ -89,6 +89,7 @@ def winded(p1, p2, p3, p4):
     ps = [(atan2(p[1] - avg[1], p[0] - avg[0]), p) for p in [p1, p2, p3, p4]]
     ps.sort(reverse=True)
     return [p[1] for p in ps]
+
 
 def neighbors(f, s):
     """
@@ -301,8 +302,9 @@ class RubiksFinder(object):
         self.prev_grey, self.grey = self.grey, self.prev_grey
         self.prev_pyramid, self.pyramid = self.pyramid, self.prev_pyramid
 
-        # Display a circle around each detected square (this bars on EV3)
-        # cv.ShowImage("Fig", self.sg)
+        # Display a circle around each detected square (this barfs on EV3)
+        if display_window:
+            cv.ShowImage("Fig", self.sg)
 
     def verify_still_tracking(self):
         self.detected = 2
@@ -705,7 +707,7 @@ class RubiksFinder(object):
 
                 if self.extract:
                     cs.append(col)
-                    center_pixels.append(p_int)
+                    center_pixels.append((p_int[0] * den, p_int[1] * den))
                     hsvcs.append((hueavg[0], satavg[0]))
 
         if self.extract:
@@ -925,7 +927,6 @@ def analyze_file(filename):
 
     (S1, S2) = cv.GetSize(img)
     rf = RubiksFinder(S1, S2)
-    display_window = False
 
     if display_window:
         cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
@@ -1051,7 +1052,7 @@ if __name__ == '__main__':
 
     if args.filename:
         rgb_all_squares = analyze_file(args.filename)
-        print(json.dumps(rgb_all_squares, indent=4))
+        print(json.dumps(rgb_all_squares))
 
     else:
         analyze_webcam(args.width, args.height)
