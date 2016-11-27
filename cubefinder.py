@@ -2,6 +2,7 @@
 
 import argparse
 import cv
+import json
 import logging
 import sys
 from random import uniform
@@ -596,7 +597,7 @@ class RubiksFinder(object):
                     self.succ += 1
                     self.pt = self.prevface
                     self.detected = 1
-                    log.info("detected %d, succ %d" % (self.detected, self.succ))
+                    # log.info("detected %d, succ %d" % (self.detected, self.succ))
 
             else:
                 self.succ = 0
@@ -937,7 +938,7 @@ def analyze_file(filename):
     for x in xrange(ATTEMPTS):
         rf.analyze_frame(img)
 
-        # we can track but it takes 33 attempts (why 33?)
+        # we can "track" (find the cube in the pic) but it takes ~30 attempts...why ~30?
         log.info("analyze_frame %d/%d: tracking %s" % (x, ATTEMPTS-1, rf.tracking))
 
         if rf.tracking:
@@ -956,8 +957,12 @@ def analyze_file(filename):
     colors = rf.colors[0]
     colors_final = []
 
-    for (red, green, blue, _) in colors:
-        # dwalton double check that it is RGB and not some other funky order
+    # opencv returns BGR, not RGB
+    # http://docs.opencv.org/3.0-beta/doc/py_tutorials/py_core/py_basic_ops/py_basic_ops.html#basic-ops
+    for (blue, green, red, _) in colors:
+
+        # Save in RGB, this makes the colors much easier to print on a web page
+        # for troubleshooting, it is also the format expected by rubiks_rgb_solver.py
         colors_final.append((int(red), int(green), int(blue)))
 
     return colors_final
@@ -1035,6 +1040,7 @@ if __name__ == '__main__':
     logging.addLevelName(logging.WARNING, "\033[91m%s\033[0m" % logging.getLevelName(logging.WARNING))
 
     if args.filename:
-        print analyze_file(args.filename)
+        rgb_all_squares = analyze_file(args.filename)
+        print json.dumps(rgb_all_squares, indent=4)
     else:
         analyze_webcam(args.width, args.height)
