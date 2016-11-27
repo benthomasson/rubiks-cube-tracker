@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+import argparse
 import cv
 import logging
 import sys
@@ -189,665 +190,500 @@ def neighbors(f, s):
         return ((3, 6), (0, 8))
 
 
-def processColors(useRGB=True):
-    """
-    User hits the letter p, assign a color to each square
-    """
-    global assigned, didassignments
-
-    # assign all colors
-    bestj = 0
-    besti = 0
-    bestcon = 0
-    matchesto = 0
-    bestd = 10001
-    taken = [0 for i in range(6)]
-    done = 0
-    opposite = {0: 2, 1: 3, 2: 0, 3: 1, 4: 5, 5: 4}  # dict of opposite faces
-
-    # possibilities for each face
-    poss = {}
-    for j, f in enumerate(hsvs):
-        for i, s in enumerate(f):
-            poss[j, i] = range(6)
-
-    # we are looping different arrays based on the useRGB flag
-    toloop = hsvs
-    if useRGB:
-        toloop = colors
-
-    while done < 8 * 6:
-        bestd = 10000
-        forced = False
-
-        for j, f in enumerate(toloop):
-            for i, s in enumerate(f):
-                if i != 4 and assigned[j][i] == -1 and (not forced):
-
-                    # this is a non-center sticker.
-                    # find the closest center
-                    considered = 0
-                    for k in poss[j, i]:
-
-                        # all colors for this center were already assigned
-                        if taken[k] < 8:
-
-                            # use Euclidean in RGB space or more elaborate
-                            # distance metric for Hue Saturation
-                            if useRGB:
-                                dist = ptdst3(s, toloop[k][4])
-                            else:
-                                dist = ptdstw(s, toloop[k][4])
-
-                            considered += 1
-                            if dist < bestd:
-                                bestd = dist
-                                bestj = j
-                                besti = i
-                                matchesto = k
-
-                    # IDEA: ADD PENALTY IF 2ND CLOSEST MATCH IS CLOSE TO FIRST
-                    # i.e. we are uncertain about it
-                    if besti == i and bestj == j:
-                        bestcon = considered
-
-                    if considered == 1:
-                        # this sticker is forced! Terminate search
-                        # for better matches
-                        forced = True
-                        print 'sticker', (i, j), 'had color forced!'
-
-        # assign it
-        done = done + 1
-
-        # print matchesto,bestd
-        assigned[bestj][besti] = matchesto
-        print bestcon
-
-        op = opposite[matchesto]  # get the opposite side
-
-        # remove this possibility from neighboring stickers
-        # since we cant have red-red edges for example
-        # also corners have 2 neighbors. Also remove possibilities
-        # of edge/corners made up of opposite sides
-        ns = neighbors(bestj, besti)
-        log.info("processColors: poss %s" % pformat(poss))
-        log.info("processColors: ns %s" % pformat(ns))
-
-        for neighbor in ns:
-            p = poss[neighbor]
-
-            if matchesto in p:
-                p.remove(matchesto)
-            if op in p:
-                p.remove(op)
-
-        taken[matchesto] += 1
-
-    didassignments = True
-
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s %(levelname)7s %(filename)12s: %(message)s')
-    log = logging.getLogger(__name__)
-
-    # Color the errors and warnings in red
-    logging.addLevelName(logging.ERROR, "\033[91m  %s\033[0m" % logging.getLevelName(logging.ERROR))
-    logging.addLevelName(logging.WARNING, "\033[91m%s\033[0m" % logging.getLevelName(logging.WARNING))
-
-    # 0 for laptop camera
-    # 1 for usb camera
-    capture = cv.CreateCameraCapture(1)
-
-    # default
-    WIDTH = 640
-    HEIGHT = 480
-
-    # max for my camera...takes too much cpu
-    WIDTH = 1280
-    HEIGHT = 720
-
-    # works but takes a second to get going
-    WIDTH = 1024
-    HEIGHT = 768
-
-    # works
-    WIDTH = 800
-    HEIGHT = 600
-
-    # Set the capture resolution
-    cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_WIDTH, WIDTH)
-    cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_HEIGHT, HEIGHT)
-
-    cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
-    # Set the window size to match the capture resolution
-    cv.ResizeWindow("Fig", WIDTH, HEIGHT)
-
-    frame = cv.QueryFrame(capture)
-    S1, S2 = cv.GetSize(frame)
-
-    log.info("size: %s %s" % (S1, S2))
-    den = 2
-
-    sg = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-    sgc = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-    hsv = cv.CreateImage((S1 / den, S2 / den), 8, 3)
-    dst2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-    d = cv.CreateImage((S1 / den, S2 / den), cv.IPL_DEPTH_16S, 1)
-    d2 = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-    b = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-
-    W, H = S1 / den, S2 / den
-    lastdetected = 0
-    THR = 100
-    dects = 50  # ideal number of number of lines detections
-
-    hue = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-    sat = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-    val = cv.CreateImage((S1 / den, S2 / den), 8, 1)
-
-    # stores the coordinates that make up the face. in order: p,p1,p3,p2 (i.e.) counterclockwise winding
-    prevface = [(0, 0), (5, 0), (0, 5)]
-    dodetection = True
-    onlyBlackCubes = False
-
-    succ = 0  # number of frames in a row that we were successful in finding the outline
-    tracking = False
-    win_size = 5
-    flags = 0
-    detected = 0
-
-    grey = cv.CreateImage((W, H), 8, 1)
-    prev_grey = cv.CreateImage((W, H), 8, 1)
-    pyramid = cv.CreateImage((W, H), 8, 1)
-    prev_pyramid = cv.CreateImage((W, H), 8, 1)
-
-    ff = cv.InitFont(cv.CV_FONT_HERSHEY_PLAIN, 1, 1, shear=0, thickness=1, lineType=8)
-
-    undetectednum = 100
-    extract = False
-    selected = 0
-    colors = [[] for i in range(6)]
-    hsvs = [[] for i in range(6)]
-    assigned = [[-1 for i in range(9)] for j in range(6)]
-
-    for i in range(6):
-        assigned[i][4] = i
-
-    didassignments = False
-
-    # Used only for visualization purposes
-    mycols = [(0, 127, 255),   # orange
-              (20, 240, 20),   # green
-              (0, 0, 255),     # red
-              (200, 0, 0),     # blue
-              (0, 255, 255),   # yellow
-              (255, 255, 255)] # white
-
-    while True:
-        frame = cv.QueryFrame(capture)
-
-        if not frame:
-            cv.WaitKey(0)
-            break
-
-        # log.info("processing frame")
-        cv.Resize(frame, sg)
-        # cv.EqualizeHist(val, val)
-        # cv.Merge(hue,sat,val,None,sg2)
-        # cv.CvtColor(sg2,sg,cv.CV_HSV2RGB)
-        cv.Copy(sg, sgc)
-        cv.CvtColor(sg, grey, cv.CV_RGB2GRAY)
-        # cv.EqualizeHist(grey,grey)
-
-        # tracking mode
-        if tracking:
-
-            detected = 2
-
-            # compute optical flow
-            features, status, track_error = cv.CalcOpticalFlowPyrLK(
-                prev_grey, grey, prev_pyramid, pyramid,
-                features,
-                (win_size, win_size), 3,
-                (cv.CV_TERMCRIT_ITER | cv.CV_TERMCRIT_EPS, 20, 0.03),
-                flags)
-
-            # set back the points we keep
-            features = [p for (st, p) in zip(status, features) if st]
-
-            if len(features) < 4:
-                tracking = False  # we lost it, restart search
-            else:
-                # make sure that in addition the distances are consistent
-                ds1 = ptdst(features[0], features[1])
-                ds2 = ptdst(features[2], features[3])
-
-                if max(ds1, ds2) / min(ds1, ds2) > 1.4:
-                    tracking = False
-
-                ds3 = ptdst(features[0], features[2])
-                ds4 = ptdst(features[1], features[3])
-
-                if max(ds3, ds4) / min(ds3, ds4) > 1.4:
-                    tracking = False
-
-                if ds1 < 10 or ds2 < 10 or ds3 < 10 or ds4 < 10:
-                    tracking = False
-                if not tracking:
-                    detected = 0
-
-        # dwalton guts starts here
-        # detection mode
-        if not tracking:
-            detected = 0
-            cv.Smooth(grey, dst2, cv.CV_GAUSSIAN, 3)
-            cv.Laplace(dst2, d)
-            cv.CmpS(d, 8, d2, cv.CV_CMP_GT)
-
-            if onlyBlackCubes:
-                # can also detect on black lines for improved robustness
-                cv.CmpS(grey, 100, b, cv.CV_CMP_LT)
-                cv.And(b, d2, d2)
-
-            # these weights should be adaptive. We should always detect 100 lines
-            if lastdetected > dects:
-                THR = THR + 1
-
-            if lastdetected < dects:
-                THR = max(2, THR - 1)
-
-            li = cv.HoughLines2(d2, cv.CreateMemStorage(), cv.CV_HOUGH_PROBABILISTIC, 1, 3.1415926 / 45, THR, 10, 5)
-
-            # store angles for later
-            angs = []
-            for (p1, p2) in li:
-                # cv.Line(sg,p1,p2,(0,255,0))
-                a = atan2(p2[1] - p1[1], p2[0] - p1[0])
-                if a < 0:
-                    a += pi
-                angs.append(a)
-
-            # lets look for lines that share a common end point
-            t = 10
-            totry = []
-
-            for i in range(len(li)):
-                p1, p2 = li[i]
-
-                for j in range(i + 1, len(li)):
-                    q1, q2 = li[j]
-
-                    # test lengths are approximately consistent
-                    dd1 = sqrt((p2[0] - p1[0]) * (p2[0] - p1[0]) + (p2[1] - p1[1]) * (p2[1] - p1[1]))
-                    dd2 = sqrt((q2[0] - q1[0]) * (q2[0] - q1[0]) + (q2[1] - q1[1]) * (q2[1] - q1[1]))
-
-                    if max(dd1, dd2) / min(dd1, dd2) > 1.3:
-                        continue
-
-                    matched = 0
-                    if areclose(p1, q2, t):
-                        IT = (avg(p1, q2), p2, q1, dd1)
-                        matched = matched + 1
-
-                    if areclose(p2, q2, t):
-                        IT = (avg(p2, q2), p1, q1, dd1)
-                        matched = matched + 1
-
-                    if areclose(p1, q1, t):
-                        IT = (avg(p1, q1), p2, q2, dd1)
-                        matched = matched + 1
-
-                    if areclose(p2, q1, t):
-                        IT = (avg(p2, q1), q2, p1, dd1)
-                        matched = matched + 1
-
-                    if matched == 0:
-                        # not touching at corner... try also inner grid segments hypothesis?
-                        p1 = (float(p1[0]), float(p1[1]))
-                        p2 = (float(p2[0]), float(p2[1]))
-                        q1 = (float(q1[0]), float(q1[1]))
-                        q2 = (float(q2[0]), float(q2[1]))
-                        success, (ua, ub), (x, y) = intersect_seg(p1[0], p2[0], q1[0], q2[0], p1[1], p2[1], q1[1], q2[1])
-
-                        if success and ua > 0 and ua < 1 and ub > 0 and ub < 1:
-                            # if they intersect
-                            # cv.Line(sg, p1, p2, (255,255,255))
-                            ok1 = 0
-                            ok2 = 0
-
-                            if abs(ua - 1.0 / 3) < 0.05:
-                                ok1 = 1
-
-                            if abs(ua - 2.0 / 3) < 0.05:
-                                ok1 = 2
-
-                            if abs(ub - 1.0 / 3) < 0.05:
-                                ok2 = 1
-
-                            if abs(ub - 2.0 / 3) < 0.05:
-                                ok2 = 2
-
-                            if ok1 > 0 and ok2 > 0:
-                                # ok these are inner lines of grid
-                                # flip if necessary
-                                if ok1 == 2:
-                                    p1, p2 = p2, p1
-                                if ok2 == 2:
-                                    q1, q2 = q2, q1
-
-                                # both lines now go from p1->p2, q1->q2 and
-                                # intersect at 1/3
-                                # calculate IT
-                                z1 = (q1[0] + 2.0 / 3 * (p2[0] - p1[0]), q1[1] + 2.0 / 3 * (p2[1] - p1[1]))
-                                z2 = (p1[0] + 2.0 / 3 * (q2[0] - q1[0]), p1[1] + 2.0 / 3 * (q2[1] - q1[1]))
-                                z = (p1[0] - 1.0 / 3 * (q2[0] - q1[0]), p1[1] - 1.0 / 3 * (q2[1] - q1[1]))
-                                IT = (z, z1, z2, dd1)
-                                matched = 1
-
-                    # only single one matched!! Could be corner
-                    if matched == 1:
-
-                        # also test angle
-                        a1 = atan2(p2[1] - p1[1], p2[0] - p1[0])
-                        a2 = atan2(q2[1] - q1[1], q2[0] - q1[0])
-
-                        if a1 < 0:
-                            a1 += pi
-
-                        if a2 < 0:
-                            a2 += pi
-
-                        ang = abs(abs(a2 - a1) - pi / 2)
-
-                        if ang < 0.5:
-                            totry.append(IT)
-                            # cv.Circle(sg, IT[0], 5, (255,255,255))
-
-            # now check if any points in totry are consistent!
-            # t=4
-            res = []
-            for i in range(len(totry)):
-
-                p, p1, p2, dd = totry[i]
-                a1 = atan2(p1[1] - p[1], p1[0] - p[0])
-                a2 = atan2(p2[1] - p[1], p2[0] - p[0])
-
-                if a1 < 0:
-                    a1 += pi
-
-                if a2 < 0:
-                    a2 += pi
-
-                dd = 1.7 * dd
-                evidence = 0
-
-                # cv.Line(sg,p,p2,(0,255,0))
-                # cv.Line(sg,p,p1,(0,255,0))
-
-                # affine transform to local coords
-                A = matrix([[p2[0] - p[0], p1[0] - p[0], p[0]], [p2[1] - p[1], p1[1] - p[1], p[1]], [0, 0, 1]])
-                Ainv = A.I
-
-                v = matrix([[p1[0]], [p1[1]], [1]])
-
-                # check likelihood of this coordinate system. iterate all lines
-                # and see how many align with grid
-                for j in range(len(li)):
-
-                    # test angle consistency with either one of the two angles
-                    a = angs[j]
-                    ang1 = abs(abs(a - a1) - pi / 2)
-                    ang2 = abs(abs(a - a2) - pi / 2)
-
-                    if ang1 > 0.1 and ang2 > 0.1:
-                        continue
-
-                    # test position consistency.
-                    q1, q2 = li[j]
-                    qwe = 0.06
-
-                    # test one endpoint
-                    v = matrix([[q1[0]], [q1[1]], [1]])
-                    vp = Ainv * v
-
-                    # project it
-                    if vp[0, 0] > 1.1 or vp[0, 0] < -0.1:
-                        continue
-
-                    if vp[1, 0] > 1.1 or vp[1, 0] < -0.1:
-                        continue
-
-                    if abs(vp[0, 0] - 1 / 3.0) > qwe and abs(vp[0, 0] - 2 / 3.0) > qwe and \
-                            abs(vp[1, 0] - 1 / 3.0) > qwe and abs(vp[1, 0] - 2 / 3.0) > qwe:
-                            continue
-
-                    # the other end point
-                    v = matrix([[q2[0]], [q2[1]], [1]])
-                    vp = Ainv * v
-
-                    if vp[0, 0] > 1.1 or vp[0, 0] < -0.1:
-                        continue
-
-                    if vp[1, 0] > 1.1 or vp[1, 0] < -0.1:
-                        continue
-
-                    if abs(vp[0, 0] - 1 / 3.0) > qwe and abs(vp[0, 0] - 2 / 3.0) > qwe and \
-                            abs(vp[1, 0] - 1 / 3.0) > qwe and abs(vp[1, 0] - 2 / 3.0) > qwe:
-                            continue
-
-                    # cv.Circle(sg, q1, 3, (255,255,0))
-                    # cv.Circle(sg, q2, 3, (255,255,0))
-                    # cv.Line(sg,q1,q2,(0,255,255))
-                    evidence += 1
-
-                # print evidence
-                res.append((evidence, (p, p1, p2)))
-
-            minch = 10000
-            res.sort(reverse=True)
-            # print [a[0] for a in res]
-
-            if len(res) > 0:
-                minps = []
-                pt = []
-
-                # among good observations find best one that fits with last one
-                for i in range(len(res)):
-
-                    if res[i][0] > 0.05 * dects:
-                        # OK WE HAVE GRID
-                        p, p1, p2 = res[i][1]
-                        p3 = (p2[0] + p1[0] - p[0], p2[1] + p1[1] - p[1])
-
-                        # cv.Line(sg,p,p1,(0,255,0),2)
-                        # cv.Line(sg,p,p2,(0,255,0),2)
-                        # cv.Line(sg,p2,p3,(0,255,0),2)
-                        # cv.Line(sg,p3,p1,(0,255,0),2)
-                        # cen=(0.5*p2[0]+0.5*p1[0],0.5*p2[1]+0.5*p1[1])
-                        # cv.Circle(sg, cen, 20, (0,0,255),5)
-                        # cv.Line(sg, (0,cen[1]), (320,cen[1]),(0,255,0),2)
-                        # cv.Line(sg, (cen[0],0), (cen[0],240), (0,255,0),2)
-
-                        w = [p, p1, p2, p3]
-                        p3 = (prevface[2][0] + prevface[1][0] - prevface[0][0],
-                              prevface[2][1] + prevface[1][1] - prevface[0][1])
-                        tc = (prevface[0], prevface[1], prevface[2], p3)
-                        ch = compfaces(w, tc)
-                        if ch < minch:
-                            minch = ch
-                            minps = (p, p1, p2)
-
-                if len(minps) > 0:
-                    prevface = minps
-                    # print minch
-
-                    if minch < 10:
-                        # good enough!
-                        succ += 1
-                        pt = prevface
-                        detected = 1
-
-                else:
-                    succ = 0
-
-                # we matched a few times same grid
-                # coincidence? I think NOT!!! Init LK tracker
-                if succ > 2 and 1:
-
-                    # initialize features for LK
-                    pt = []
-                    for i in [1.0 / 3, 2.0 / 3]:
-                        for j in [1.0 / 3, 2.0 / 3]:
-                            pt.append((p0[0] + i * v1[0] + j * v2[0], p0[1] + i * v1[1] + j * v2[1]))
-
-                    # refine points slightly
-                    # features = cv.FindCornerSubPix (
-                    # grey,
-                    # pt,
-                    #(win_size, win_size),  (-1, -1),
-                    #(cv.CV_TERMCRIT_ITER | cv.CV_TERMCRIT_EPS,
-                    # 20, 0.03))
-                    features = pt
-                    tracking = True
-                    succ = 0
-
-        # dwalton - end of guts here
+class RubiksFinder(object):
+
+    def __init__(self, S1, S2):
+        den = 2
+        self.width = S1 / den
+        self.height = S2 / den
+
+        self.sg = cv.CreateImage((self.width, self.height), 8, 3)
+        self.sgc = cv.CreateImage((self.width, self.height), 8, 3)
+        self.hsv = cv.CreateImage((self.width, self.height), 8, 3)
+        self.dst2 = cv.CreateImage((self.width, self.height), 8, 1)
+        self.d = cv.CreateImage((self.width, self.height), cv.IPL_DEPTH_16S, 1)
+        self.d2 = cv.CreateImage((self.width, self.height), 8, 1)
+        self.b = cv.CreateImage((self.width, self.height), 8, 1)
+
+        self.lastdetected = 0
+        self.THR = 100
+        self.dects = 50  # ideal number of number of lines detections
+
+        self.hue = cv.CreateImage((self.width, self.height), 8, 1)
+        self.sat = cv.CreateImage((self.width, self.height), 8, 1)
+        self.val = cv.CreateImage((self.width, self.height), 8, 1)
+
+        # stores the coordinates that make up the face. in order: p,p1,p3,p2 (i.e.) counterclockwise winding
+        self.prevface = [(0, 0), (5, 0), (0, 5)]
+        self.dodetection = True
+        self.onlyBlackCubes = False
+
+        self.succ = 0  # number of frames in a row that we were successful in finding the outline
+        self.tracking = False
+        self.win_size = 5
+        self.flags = 0
+        self.detected = 0
+
+        self.grey = cv.CreateImage((self.width, self.height), 8, 1)
+        self.prev_grey = cv.CreateImage((self.width, self.height), 8, 1)
+        self.pyramid = cv.CreateImage((self.width, self.height), 8, 1)
+        self.prev_pyramid = cv.CreateImage((self.width, self.height), 8, 1)
+
+        self.ff = cv.InitFont(cv.CV_FONT_HERSHEY_PLAIN, 1, 1, shear=0, thickness=1, lineType=8)
+
+        self.undetectednum = 100
+        self.extract = False
+        self.selected = 0
+        self.colors = [[] for i in range(6)]
+        self.hsvs = [[] for i in range(6)]
+        self.assigned = [[-1 for i in range(9)] for j in range(6)]
+
+        for i in range(6):
+            self.assigned[i][4] = i
+
+        self.didassignments = False
+
+        # Used only for visualization purposes
+        self.mycols = [(0, 127, 255),   # orange
+                       (20, 240, 20),   # green
+                       (0, 0, 255),     # red
+                       (200, 0, 0),     # blue
+                       (0, 255, 255),   # yellow
+                       (255, 255, 255)] # white
+
+    def verify_still_tracking(self):
+        self.detected = 2
+
+        # compute optical flow
+        self.features, status, track_error = cv.CalcOpticalFlowPyrLK(
+            self.prev_grey, self.grey, self.prev_pyramid, self.pyramid,
+            self.features,
+            (self.win_size, self.win_size), 3,
+            (cv.CV_TERMCRIT_ITER | cv.CV_TERMCRIT_EPS, 20, 0.03),
+            self.flags)
+
+        # set back the points we keep
+        self.features = [p for (st, p) in zip(status, self.features) if st]
+
+        if len(self.features) < 4:
+            self.tracking = False  # we lost it, restart search
+            log.info("tracking -> not tracking: len features %d < 4" % len(self.features))
         else:
-            # we are in tracking mode, we need to fill in pt[] array
-            # calculate the pt array for drawing from features
-            # for p in features:
-            #    cv.Circle(sg, p, 3, (255,255,255),-1)
-            p = features[0]
-            p1 = features[1]
-            p2 = features[2]
+            # make sure that in addition the distances are consistent
+            ds1 = ptdst(self.features[0], self.features[1])
+            ds2 = ptdst(self.features[2], self.features[3])
 
-            v1 = (p1[0] - p[0], p1[1] - p[1])
-            v2 = (p2[0] - p[0], p2[1] - p[1])
+            if max(ds1, ds2) / min(ds1, ds2) > 1.4:
+                self.tracking = False
+                log.info("tracking -> not tracking: max/min ds1 %s, ds2 %s > 1.4" % (ds1, ds2))
 
-            pt = [(p[0] - v1[0] - v2[0], p[1] - v1[1] - v2[1]),
-                  (p[0] + 2 * v2[0] - v1[0], p[1] + 2 * v2[1] - v1[1]),
-                  (p[0] + 2 * v1[0] - v2[0], p[1] + 2 * v1[1] - v2[1])]
+            ds3 = ptdst(self.features[0], self.features[2])
+            ds4 = ptdst(self.features[1], self.features[3])
 
-            prevface = [pt[0], pt[1], pt[2]]
+            if max(ds3, ds4) / min(ds3, ds4) > 1.4:
+                self.tracking = False
+                log.info("tracking -> not tracking: max/min ds3 %s, ds4 %s > 1.4" % (ds3, ds4))
 
-        # dwalton - start of drawing circles/lines
-        # use pt[] array to do drawing
-        if (detected or undetectednum < 1) and dodetection:
+            if ds1 < 10 or ds2 < 10 or ds3 < 10 or ds4 < 10:
+                self.tracking = False
+                log.info("tracking -> not tracking: ds1 %s, ds2 %s, ds3 %s, ds4 %s" % (ds1, ds2, ds3, ds4))
 
-            # undetectednum 'fills in' a few detection to make
-            # things look smoother in case we fall out one frame
-            # for some reason
-            if not detected:
-                undetectednum += 1
-                pt = lastpt
+            if not self.tracking:
+                self.detected = 0
 
-            if detected:
-                undetectednum = 0
-                lastpt = pt
+    def detect(self):
+        self.detected = 0
+        cv.Smooth(self.grey, self.dst2, cv.CV_GAUSSIAN, 3)
+        cv.Laplace(self.dst2, self.d)
+        cv.CmpS(self.d, 8, self.d2, cv.CV_CMP_GT)
 
-            # extract the colors
-            # convert to HSV
-            cv.CvtColor(sgc, hsv, cv.CV_RGB2HSV)
-            cv.Split(hsv, hue, sat, val, None)
+        if self.onlyBlackCubes:
+            # can also detect on black lines for improved robustness
+            cv.CmpS(grey, 100, b, cv.CV_CMP_LT)
+            cv.And(b, d2, d2)
 
-            pt_int = []
-            for (foo, bar) in pt:
-                pt_int.append((int(foo), int(bar)))
+        # these weights should be adaptive. We should always detect 100 lines
+        if self.lastdetected > self.dects:
+            self.THR = self.THR + 1
 
-            # do the drawing. pt array should store p,p1,p2
-            p3 = (pt[2][0] + pt[1][0] - pt[0][0], pt[2][1] + pt[1][1] - pt[0][1])
-            p2_int = (int(p2[0]), int(p2[1]))
-            p3_int = (int(p3[0]), int(p3[1]))
+        if self.lastdetected < self.dects:
+            self.THR = max(2, self.THR - 1)
 
-            cv.Line(sg, pt_int[0], pt_int[1], (0, 255, 0), 2)
-            cv.Line(sg, pt_int[1], p3_int, (0, 255, 0), 2)
-            cv.Line(sg, p3_int, pt_int[2], (0, 255, 0), 2)
-            cv.Line(sg, pt_int[2], pt_int[0], (0, 255, 0), 2)
+        self.li = cv.HoughLines2(self.d2, cv.CreateMemStorage(), cv.CV_HOUGH_PROBABILISTIC, 1, 3.1415926 / 45, self.THR, 10, 5)
 
-            # first sort the points so that 0 is BL 1 is UL and 2 is BR
-            pt = winded(pt[0], pt[1], pt[2], p3)
+        # store angles for later
+        angs = []
+        for (p1, p2) in self.li:
+            # cv.Line(sg,p1,p2,(0,255,0))
+            a = atan2(p2[1] - p1[1], p2[0] - p1[0])
+            if a < 0:
+                a += pi
+            angs.append(a)
 
-            # find the coordinates of the 9 places we want to extract over
-            v1 = (pt[1][0] - pt[0][0], pt[1][1] - pt[0][1])
-            v2 = (pt[3][0] - pt[0][0], pt[3][1] - pt[0][1])
-            p0 = (pt[0][0], pt[0][1])
+        log.debug("angles: %s" % pformat(angs))
 
-            ep = []
-            i = 1
-            j = 5
-            for k in range(9):
-                ep.append((p0[0] + i * v1[0] / 6.0 + j * v2[0] / 6.0, p0[1] + i * v1[1] / 6.0 + j * v2[1] / 6.0))
-                i = i + 2
-                if i == 7:
-                    i = 1
-                    j = j - 2
+        # lets look for lines that share a common end point
+        t = 10
+        totry = []
 
-            rad = ptdst(v1, (0.0, 0.0)) / 6.0
-            cs = []
-            hsvcs = []
-            den = 2
+        for i in range(len(self.li)):
+            p1, p2 = self.li[i]
 
-            for i, p in enumerate(ep):
-                if p[0] > rad and p[0] < W - rad and p[1] > rad and p[1] < H - rad:
+            for j in range(i + 1, len(self.li)):
+                q1, q2 = self.li[j]
 
-                    # valavg=val[int(p[1]-rad/3):int(p[1]+rad/3),int(p[0]-rad/3):int(p[0]+rad/3)]
-                    # mask=cv.CreateImage(cv.GetDims(valavg), 8, 1 )
+                # test lengths are approximately consistent
+                dd1 = sqrt((p2[0] - p1[0]) * (p2[0] - p1[0]) + (p2[1] - p1[1]) * (p2[1] - p1[1]))
+                dd2 = sqrt((q2[0] - q1[0]) * (q2[0] - q1[0]) + (q2[1] - q1[1]) * (q2[1] - q1[1]))
 
-                    col = cv.Avg(sgc[int(p[1] - rad / den):int(p[1] + rad / den),
-                                     int(p[0] - rad / den):int(p[0] + rad / den)])
+                if max(dd1, dd2) / min(dd1, dd2) > 1.3:
+                    continue
 
-                    col = cv.Avg(sgc[int(p[1] - rad / den):int(p[1] + rad / den),
-                                     int(p[0] - rad / den):int(p[0] + rad / den)])
+                matched = 0
+                if areclose(p1, q2, t):
+                    IT = (avg(p1, q2), p2, q1, dd1)
+                    matched = matched + 1
 
-                    p_int = (int(p[0]), int(p[1]))
-                    cv.Circle(sg, p_int, int(rad), col, -1)
+                if areclose(p2, q2, t):
+                    IT = (avg(p2, q2), p1, q1, dd1)
+                    matched = matched + 1
 
-                    if i == 4:
-                        cv.Circle(sg, p_int, int(rad), (0, 255, 255), 2)
-                    else:
-                        cv.Circle(sg, p_int, int(rad), (255, 255, 255), 2)
+                if areclose(p1, q1, t):
+                    IT = (avg(p1, q1), p2, q2, dd1)
+                    matched = matched + 1
 
-                    hueavg = cv.Avg(hue[int(p[1] - rad / den):int(p[1] + rad / den),
-                                        int(p[0] - rad / den):int(p[0] + rad / den)])
-                    satavg = cv.Avg(sat[int(p[1] - rad / den):int(p[1] + rad / den),
-                                        int(p[0] - rad / den):int(p[0] + rad / den)])
+                if areclose(p2, q1, t):
+                    IT = (avg(p2, q1), q2, p1, dd1)
+                    matched = matched + 1
 
-                    cv.PutText(sg, repr(int(hueavg[0])), (p_int[0] + 70, p_int[1]), ff, (255, 255, 255))
-                    cv.PutText(sg, repr(int(satavg[0])), (p_int[0] + 70, p_int[1] + 10), ff, (255, 255, 255))
+                if matched == 0:
+                    # not touching at corner... try also inner grid segments hypothesis?
+                    self.p1 = (float(p1[0]), float(p1[1]))
+                    self.p2 = (float(p2[0]), float(p2[1]))
+                    self.q1 = (float(q1[0]), float(q1[1]))
+                    self.q2 = (float(q2[0]), float(q2[1]))
+                    success, (ua, ub), (x, y) = intersect_seg(self.p1[0], self.p2[0], self.q1[0], self.q2[0], self.p1[1], self.p2[1], self.q1[1], self.q2[1])
 
-                    if extract:
-                        cs.append(col)
-                        hsvcs.append((hueavg[0], satavg[0]))
+                    if success and ua > 0 and ua < 1 and ub > 0 and ub < 1:
+                        # if they intersect
+                        # cv.Line(sg, p1, p2, (255,255,255))
+                        ok1 = 0
+                        ok2 = 0
 
-            if extract:
-                extract = not extract
-                colors[selected] = cs
-                hsvs[selected] = hsvcs
-                selected = min(selected + 1, 5)
-        # dwalton - end of drawing circles/lines
+                        if abs(ua - 1.0 / 3) < 0.05:
+                            ok1 = 1
 
-        # dwalton - this runs if you hit spacebar to extract
-        # draw faces of the extracted cubes
+                        if abs(ua - 2.0 / 3) < 0.05:
+                            ok1 = 2
+
+                        if abs(ub - 1.0 / 3) < 0.05:
+                            ok2 = 1
+
+                        if abs(ub - 2.0 / 3) < 0.05:
+                            ok2 = 2
+
+                        if ok1 > 0 and ok2 > 0:
+                            # ok these are inner lines of grid
+                            # flip if necessary
+                            if ok1 == 2:
+                                self.p1, self.p2 = self.p2, self.p1
+
+                            if ok2 == 2:
+                                self.q1, self.q2 = self.q2, self.q1
+
+                            # both lines now go from p1->p2, q1->q2 and
+                            # intersect at 1/3
+                            # calculate IT
+                            z1 = (self.q1[0] + 2.0 / 3 * (self.p2[0] - self.p1[0]), self.q1[1] + 2.0 / 3 * (self.p2[1] - self.p1[1]))
+                            z2 = (self.p1[0] + 2.0 / 3 * (self.q2[0] - self.q1[0]), self.p1[1] + 2.0 / 3 * (self.q2[1] - self.q1[1]))
+                            z = (self.p1[0] - 1.0 / 3 * (self.q2[0] - self.q1[0]), self.p1[1] - 1.0 / 3 * (self.q2[1] - self.q1[1]))
+                            IT = (z, z1, z2, dd1)
+                            matched = 1
+
+                # only single one matched!! Could be corner
+                if matched == 1:
+
+                    # also test angle
+                    a1 = atan2(p2[1] - p1[1], p2[0] - p1[0])
+                    a2 = atan2(q2[1] - q1[1], q2[0] - q1[0])
+
+                    if a1 < 0:
+                        a1 += pi
+
+                    if a2 < 0:
+                        a2 += pi
+
+                    ang = abs(abs(a2 - a1) - pi / 2)
+
+                    if ang < 0.5:
+                        totry.append(IT)
+                        # cv.Circle(sg, IT[0], 5, (255,255,255))
+
+        # now check if any points in totry are consistent!
+        # t=4
+        res = []
+        for i in range(len(totry)):
+
+            p, p1, p2, dd = totry[i]
+            a1 = atan2(p1[1] - p[1], p1[0] - p[0])
+            a2 = atan2(p2[1] - p[1], p2[0] - p[0])
+
+            if a1 < 0:
+                a1 += pi
+
+            if a2 < 0:
+                a2 += pi
+
+            dd = 1.7 * dd
+            evidence = 0
+
+            # cv.Line(sg,p,p2,(0,255,0))
+            # cv.Line(sg,p,p1,(0,255,0))
+
+            # affine transform to local coords
+            A = matrix([[p2[0] - p[0], p1[0] - p[0], p[0]], [p2[1] - p[1], p1[1] - p[1], p[1]], [0, 0, 1]])
+            Ainv = A.I
+
+            v = matrix([[p1[0]], [p1[1]], [1]])
+
+            # check likelihood of this coordinate system. iterate all lines
+            # and see how many align with grid
+            for j in range(len(self.li)):
+
+                # test angle consistency with either one of the two angles
+                a = angs[j]
+                ang1 = abs(abs(a - a1) - pi / 2)
+                ang2 = abs(abs(a - a2) - pi / 2)
+
+                if ang1 > 0.1 and ang2 > 0.1:
+                    continue
+
+                # test position consistency.
+                q1, q2 = self.li[j]
+                qwe = 0.06
+
+                # test one endpoint
+                v = matrix([[q1[0]], [q1[1]], [1]])
+                vp = Ainv * v
+
+                # project it
+                if vp[0, 0] > 1.1 or vp[0, 0] < -0.1:
+                    continue
+
+                if vp[1, 0] > 1.1 or vp[1, 0] < -0.1:
+                    continue
+
+                if abs(vp[0, 0] - 1 / 3.0) > qwe and abs(vp[0, 0] - 2 / 3.0) > qwe and \
+                        abs(vp[1, 0] - 1 / 3.0) > qwe and abs(vp[1, 0] - 2 / 3.0) > qwe:
+                        continue
+
+                # the other end point
+                v = matrix([[q2[0]], [q2[1]], [1]])
+                vp = Ainv * v
+
+                if vp[0, 0] > 1.1 or vp[0, 0] < -0.1:
+                    continue
+
+                if vp[1, 0] > 1.1 or vp[1, 0] < -0.1:
+                    continue
+
+                if abs(vp[0, 0] - 1 / 3.0) > qwe and abs(vp[0, 0] - 2 / 3.0) > qwe and \
+                        abs(vp[1, 0] - 1 / 3.0) > qwe and abs(vp[1, 0] - 2 / 3.0) > qwe:
+                        continue
+
+                # cv.Circle(sg, q1, 3, (255,255,0))
+                # cv.Circle(sg, q2, 3, (255,255,0))
+                # cv.Line(sg,q1,q2,(0,255,255))
+                evidence += 1
+
+            # print evidence
+            res.append((evidence, (p, p1, p2)))
+
+        minch = 10000
+        res.sort(reverse=True)
+        # print [a[0] for a in res]
+
+        if len(res) > 0:
+            minps = []
+            pt = []
+
+            # among good observations find best one that fits with last one
+            for i in range(len(res)):
+
+                if res[i][0] > 0.05 * self.dects:
+                    # OK WE HAVE GRID
+                    p, p1, p2 = res[i][1]
+                    p3 = (p2[0] + p1[0] - p[0], p2[1] + p1[1] - p[1])
+
+                    # cv.Line(sg,p,p1,(0,255,0),2)
+                    # cv.Line(sg,p,p2,(0,255,0),2)
+                    # cv.Line(sg,p2,p3,(0,255,0),2)
+                    # cv.Line(sg,p3,p1,(0,255,0),2)
+                    # cen=(0.5*p2[0]+0.5*p1[0],0.5*p2[1]+0.5*p1[1])
+                    # cv.Circle(sg, cen, 20, (0,0,255),5)
+                    # cv.Line(sg, (0,cen[1]), (320,cen[1]),(0,255,0),2)
+                    # cv.Line(sg, (cen[0],0), (cen[0],240), (0,255,0),2)
+
+                    w = [p, p1, p2, p3]
+                    p3 = (self.prevface[2][0] + self.prevface[1][0] - self.prevface[0][0],
+                          self.prevface[2][1] + self.prevface[1][1] - self.prevface[0][1])
+                    tc = (self.prevface[0], self.prevface[1], self.prevface[2], p3)
+                    ch = compfaces(w, tc)
+                    if ch < minch:
+                        minch = ch
+                        minps = (p, p1, p2)
+
+            if len(minps) > 0:
+                self.prevface = minps
+                # print minch
+
+                if minch < 10:
+                    # good enough!
+                    self.succ += 1
+                    self.pt = self.prevface
+                    self.detected = 1
+
+            else:
+                self.succ = 0
+
+            # we matched a few times same grid
+            # coincidence? I think NOT!!! Init LK tracker
+            if self.succ > 2 and 1:
+
+                # initialize features for LK
+                pt = []
+                for i in [1.0 / 3, 2.0 / 3]:
+                    for j in [1.0 / 3, 2.0 / 3]:
+                        pt.append((self.p0[0] + i * self.v1[0] + j * self.v2[0], self.p0[1] + i * self.v1[1] + j * self.v2[1]))
+
+                # refine points slightly
+                # features = cv.FindCornerSubPix (
+                # grey,
+                # pt,
+                #(win_size, win_size),  (-1, -1),
+                #(cv.CV_TERMCRIT_ITER | cv.CV_TERMCRIT_EPS,
+                # 20, 0.03))
+                self.features = pt
+                self.tracking = True
+                self.succ = 0
+                log.info("non-tracking -> tracking: succ %d" % self.succ)
+
+    def draw_circles_and_lines(self):
+
+        # undetectednum 'fills in' a few detection to make
+        # things look smoother in case we fall out one frame
+        # for some reason
+        if not self.detected:
+            self.undetectednum += 1
+            self.pt = self.lastpt
+
+        if self.detected:
+            self.undetectednum = 0
+            self.lastpt = self.pt
+
+        # convert to HSV
+        cv.CvtColor(self.sgc, self.hsv, cv.CV_RGB2HSV)
+        cv.Split(self.hsv, self.hue, self.sat, self.val, None)
+
+        pt_int = []
+        for (foo, bar) in self.pt:
+            pt_int.append((int(foo), int(bar)))
+
+        # do the drawing. pt array should store p,p1,p2
+        self.p3 = (self.pt[2][0] + self.pt[1][0] - self.pt[0][0], self.pt[2][1] + self.pt[1][1] - self.pt[0][1])
+        p2_int = (int(self.p2[0]), int(self.p2[1]))
+        p3_int = (int(self.p3[0]), int(self.p3[1]))
+
+        cv.Line(self.sg, pt_int[0], pt_int[1], (0, 255, 0), 2)
+        cv.Line(self.sg, pt_int[1], p3_int, (0, 255, 0), 2)
+        cv.Line(self.sg, p3_int, pt_int[2], (0, 255, 0), 2)
+        cv.Line(self.sg, pt_int[2], pt_int[0], (0, 255, 0), 2)
+
+        # first sort the points so that 0 is BL 1 is UL and 2 is BR
+        pt = winded(self.pt[0], self.pt[1], self.pt[2], self.p3)
+
+        # find the coordinates of the 9 places we want to extract over
+        self.v1 = (pt[1][0] - pt[0][0], pt[1][1] - pt[0][1])
+        self.v2 = (pt[3][0] - pt[0][0], pt[3][1] - pt[0][1])
+        self.p0 = (pt[0][0], pt[0][1])
+
+        ep = []
+        i = 1
+        j = 5
+        for k in range(9):
+            ep.append((self.p0[0] + i * self.v1[0] / 6.0 + j * self.v2[0] / 6.0, self.p0[1] + i * self.v1[1] / 6.0 + j * self.v2[1] / 6.0))
+            i = i + 2
+            if i == 7:
+                i = 1
+                j = j - 2
+
+        rad = ptdst(self.v1, (0.0, 0.0)) / 6.0
+        cs = []
+        hsvcs = []
+        den = 2
+
+        for i, p in enumerate(ep):
+            if p[0] > rad and p[0] < self.width - rad and p[1] > rad and p[1] < self.height - rad:
+
+                # valavg=val[int(p[1]-rad/3):int(p[1]+rad/3),int(p[0]-rad/3):int(p[0]+rad/3)]
+                # mask=cv.CreateImage(cv.GetDims(valavg), 8, 1 )
+
+                col = cv.Avg(self.sgc[int(p[1] - rad / den):int(p[1] + rad / den),
+                                      int(p[0] - rad / den):int(p[0] + rad / den)])
+
+                col = cv.Avg(self.sgc[int(p[1] - rad / den):int(p[1] + rad / den),
+                                      int(p[0] - rad / den):int(p[0] + rad / den)])
+
+                p_int = (int(p[0]), int(p[1]))
+                cv.Circle(self.sg, p_int, int(rad), col, -1)
+
+                if i == 4:
+                    cv.Circle(self.sg, p_int, int(rad), (0, 255, 255), 2)
+                else:
+                    cv.Circle(self.sg, p_int, int(rad), (255, 255, 255), 2)
+
+                hueavg = cv.Avg(self.hue[int(p[1] - rad / den):int(p[1] + rad / den),
+                                         int(p[0] - rad / den):int(p[0] + rad / den)])
+                satavg = cv.Avg(self.sat[int(p[1] - rad / den):int(p[1] + rad / den),
+                                         int(p[0] - rad / den):int(p[0] + rad / den)])
+
+                cv.PutText(self.sg, repr(int(hueavg[0])), (p_int[0] + 70, p_int[1]), self.ff, (255, 255, 255))
+                cv.PutText(self.sg, repr(int(satavg[0])), (p_int[0] + 70, p_int[1] + 10), self.ff, (255, 255, 255))
+
+                if self.extract:
+                    cs.append(col)
+                    hsvcs.append((hueavg[0], satavg[0]))
+
+        if self.extract:
+            self.extract = not self.extract
+            self.colors[self.selected] = cs
+            self.hsvs[self.selected] = hsvcs
+            self.selected = min(self.selected + 1, 5)
+
+    def draw_extracted_cube_faces(self):
+        """
+        Draw faces of the extracted cubes (hit the spacebar to extract
+        the face of the currently detected cube face)
+        """
         x = 20
         y = 20
         s = 13
+
         for i in range(6):
-            if not colors[i]:
+            if not self.colors[i]:
                 x += 3 * s + 10
                 continue
 
             # draw the grid on top
-            cv.Rectangle(sg, (x - 1, y - 1), (x + 3 * s + 5, y + 3 * s + 5), (0, 0, 0), -1)
+            cv.Rectangle(self.sg, (x - 1, y - 1), (x + 3 * s + 5, y + 3 * s + 5), (0, 0, 0), -1)
             x1, y1 = x, y
             x2, y2 = x1 + s, y1 + s
 
             for j in range(9):
-                if didassignments:
-                    cv.Rectangle(sg, (x1, y1), (x2, y2), mycols[assigned[i][j]], -1)
+                if self.didassignments:
+                    cv.Rectangle(self.sg, (x1, y1), (x2, y2), self.mycols[self.assigned[i][j]], -1)
                 else:
-                    cv.Rectangle(sg, (x1, y1), (x2, y2), colors[i][j], -1)
+                    cv.Rectangle(self.sg, (x1, y1), (x2, y2), self.colors[i][j], -1)
                 x1 += s + 2
                 if j == 2 or j == 5:
                     x1 = x
@@ -858,28 +694,166 @@ if __name__ == '__main__':
         # draw the selection rectangle
         x = 20
         y = 20
-        for i in range(selected):
+        for i in range(self.selected):
             x += 3 * s + 10
-        cv.Rectangle(sg, (x - 1, y - 1), (x + 3 * s + 5, y + 3 * s + 5), (0, 0, 255), 2)
+        cv.Rectangle(self.sg, (x - 1, y - 1), (x + 3 * s + 5, y + 3 * s + 5), (0, 0, 255), 2)
 
-        lastdetected = len(li)
+    def process_colors(self, useRGB=True):
+        """
+        User hits the letter p, assign a color to each square
+        """
+        # assign all colors
+        bestj = 0
+        besti = 0
+        bestcon = 0
+        matchesto = 0
+        bestd = 10001
+        taken = [0 for i in range(6)]
+        done = 0
+        opposite = {0: 2, 1: 3, 2: 0, 3: 1, 4: 5, 5: 4}  # dict of opposite faces
+
+        # possibilities for each face
+        poss = {}
+        for j, f in enumerate(self.hsvs):
+            for i, s in enumerate(f):
+                poss[j, i] = range(6)
+
+        # we are looping different arrays based on the useRGB flag
+        toloop = self.hsvs
+        if useRGB:
+            toloop = self.colors
+
+        while done < 8 * 6:
+            bestd = 10000
+            forced = False
+
+            for j, f in enumerate(toloop):
+                for i, s in enumerate(f):
+                    if i != 4 and self.assigned[j][i] == -1 and (not forced):
+
+                        # this is a non-center sticker.
+                        # find the closest center
+                        considered = 0
+                        for k in poss[j, i]:
+
+                            # all colors for this center were already assigned
+                            if taken[k] < 8:
+
+                                # use Euclidean in RGB space or more elaborate
+                                # distance metric for Hue Saturation
+                                if useRGB:
+                                    dist = ptdst3(s, toloop[k][4])
+                                else:
+                                    dist = ptdstw(s, toloop[k][4])
+
+                                considered += 1
+                                if dist < bestd:
+                                    bestd = dist
+                                    bestj = j
+                                    besti = i
+                                    matchesto = k
+
+                        # IDEA: ADD PENALTY IF 2ND CLOSEST MATCH IS CLOSE TO FIRST
+                        # i.e. we are uncertain about it
+                        if besti == i and bestj == j:
+                            bestcon = considered
+
+                        if considered == 1:
+                            # this sticker is forced! Terminate search
+                            # for better matches
+                            forced = True
+                            print 'sticker', (i, j), 'had color forced!'
+
+            # assign it
+            done = done + 1
+
+            # print matchesto,bestd
+            self.assigned[bestj][besti] = matchesto
+
+            op = opposite[matchesto]  # get the opposite side
+
+            # remove this possibility from neighboring stickers
+            # since we cant have red-red edges for example
+            # also corners have 2 neighbors. Also remove possibilities
+            # of edge/corners made up of opposite sides
+            ns = neighbors(bestj, besti)
+            log.info("neighbors: %s" % pformat(ns))
+            log.info("poss: %s" % pformat(poss))
+
+            for neighbor in ns:
+                if neighbor in poss:
+                    p = poss[neighbor]
+
+                    if matchesto in p:
+                        p.remove(matchesto)
+                    if op in p:
+                        p.remove(op)
+                else:
+                    log.warning("process_colors %s not in poss" % pformat(neighbor))
+
+            taken[matchesto] += 1
+
+        self.didassignments = True
+
+    def analyze_frame(self, frame):
+        cv.Resize(frame, self.sg)
+        # cv.EqualizeHist(val, val)
+        # cv.Merge(hue,sat,val,None,sg2)
+        # cv.CvtColor(sg2,sg,cv.CV_HSV2RGB)
+        cv.Copy(self.sg, self.sgc)
+        cv.CvtColor(self.sg, self.grey, cv.CV_RGB2GRAY)
+        # cv.EqualizeHist(grey,grey)
+
+        # tracking mode
+        if self.tracking:
+            self.verify_still_tracking()
+
+        # detection mode
+        if not self.tracking:
+            self.detect()
+
+        if self.tracking:
+            # we are in tracking mode, we need to fill in pt[] array
+            # calculate the pt array for drawing from features
+            # for p in features:
+            #    cv.Circle(sg, p, 3, (255,255,255),-1)
+            p = self.features[0]
+            p1 = self.features[1]
+            p2 = self.features[2]
+
+            v1 = (p1[0] - p[0], p1[1] - p[1])
+            v2 = (p2[0] - p[0], p2[1] - p[1])
+
+            self.pt = [(p[0] - v1[0] - v2[0], p[1] - v1[1] - v2[1]),
+                       (p[0] + 2 * v2[0] - v1[0], p[1] + 2 * v2[1] - v1[1]),
+                       (p[0] + 2 * v1[0] - v2[0], p[1] + 2 * v1[1] - v2[1])]
+
+            self.prevface = [self.pt[0], self.pt[1], self.pt[2]]
+
+        # use pt[] array to do drawing
+        if (self.detected or self.undetectednum < 1) and self.dodetection:
+            self.draw_circles_and_lines()
+
+        # draw faces of the extracted cubes (hit the spacebar to extract
+        # the face of the currently detected cube face)
+        self.draw_extracted_cube_faces()
+
+        self.lastdetected = len(self.li)
         # swapping for LK
-        prev_grey, grey = grey, prev_grey
-        prev_pyramid, pyramid = pyramid, prev_pyramid
-        # draw img
+        self.prev_grey, self.grey = self.grey, self.prev_grey
+        self.prev_pyramid, self.pyramid = self.pyramid, self.prev_pyramid
 
+        # draw img
         # cv.CvtColor(sg,sg2,cv.CV_RGB2HSV)
         # cv.Split(sg2, hue, sat, val, None)
-
         # cv.Smooth(sg,sg,cv.CV_GAUSSIAN, 5)
-        cv.ShowImage("Fig", sg)
+        cv.ShowImage("Fig", self.sg)
 
-        # dwalton - process keyboard input
-        # handle events
+    def process_keyboard_input(self):
         c = cv.WaitKey(10) % 0x100
 
-        if c == 27:
-            break  # ESC
+        if c == 27: # ESC
+            return False
 
         # processing depending on the character
         if 32 <= c and c < 128:
@@ -888,55 +862,143 @@ if __name__ == '__main__':
             # EXTRACT COLORS!!!
             if cc == ' ':
                 log.info("extract colors")
-                extract = True
+                self.extract = True
 
             elif cc == 'r':
                 log.info("reset")
                 # reset
-                extract = False
-                selected = 0
-                colors = [[] for i in range(6)]
-                didassignments = False
-                assigned = [[-1 for i in range(9)] for j in range(6)]
+                self.extract = False
+                self.selected = 0
+                self.colors = [[] for i in range(6)]
+                self.didassignments = False
+                self.assigned = [[-1 for i in range(9)] for j in range(6)]
                 for i in range(6):
-                    assigned[i][4] = i
-                didassignments = False
+                    self.assigned[i][4] = i
+                self.didassignments = False
 
             elif cc == 'n':
                 log.info("n - shift left")
-                selected = selected - 1
+                self.selected = self.selected - 1
 
-                if selected < 0:
-                    selected = 5
+                if self.selected < 0:
+                    self.selected = 5
 
             elif cc == 'm':
-                log.info("m - shift left")
-                selected = selected + 1
+                log.info("m - shift right")
+                self.selected = self.selected + 1
 
-                if selected > 5:
-                    selected = 0
+                if self.selected > 5:
+                    self.selected = 0
 
             elif cc == 'b':
-                onlyBlackCubes = not onlyBlackCubes
-                log.info("onlyBlackCubes is now %s" % onlyBlackCubes)
+                self.onlyBlackCubes = not self.onlyBlackCubes
+                log.info("onlyBlackCubes is now %s" % self.onlyBlackCubes)
 
             elif cc == 'd':
-                dodetection = not dodetection
-                log.info("dodetection is now %s" % dodetection)
+                self.dodetection = not self.dodetection
+                log.info("dodetection is now %s" % self.dodetection)
 
             elif cc == 'q':
-                print hsvs
+                print self.hsvs
 
             elif cc == 'p':
                 log.info("extract colors")
-                processColors()
+                self.process_colors()
 
             elif cc == 'u':
-                didassignments = not didassignments
-                log.info("didetection is now %s" % didetection)
+                self.didassignments = not self.didassignments
+                log.info("didassignments is now %s" % self.didassignments)
 
             elif cc == 's':
                 log.info("save image")
-                cv.SaveImage(repr(time()) + ".jpg", sgc)
+                cv.SaveImage(repr(time()) + ".jpg", self.sgc)
+
+        return True
+
+
+def analyze_file(filename):
+    frame = cv.LoadImage(filename)
+    (S1, S2) = cv.GetSize(frame)
+    rf = RubiksFinder(S1, S2)
+    rf.analyze_frame(frame)
+
+    cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
+    cv.ResizeWindow("Fig", rf.width, rf.height)
+
+    raw_input('Paused')
+    cv.DestroyWindow("Fig")
+
+
+def analyze_webcam(width, height):
+    print """
+    ' ' : extract colors of detected face
+    'b' : toggle onlyBlackCubes
+    'd' : toggle dodetection
+    'm' : shift right
+    'n' : shift left
+    'r' : reset everything
+    'q' : print hsvs
+    'p' : resolve colors
+    'u' : toggle didassignments
+    's' : save image
+
+"""
+
+    # 0 for laptop camera
+    # 1 for usb camera
+    capture = cv.CreateCameraCapture(0)
+
+    # Set the capture resolution
+    cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_WIDTH, width)
+    cv.SetCaptureProperty(capture, cv.CV_CAP_PROP_FRAME_HEIGHT, height)
+
+    # Create the window and set the size to match the capture resolution
+    cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
+    cv.ResizeWindow("Fig", width, height)
+
+    frame = cv.QueryFrame(capture)
+    S1, S2 = cv.GetSize(frame)
+    # dwalton should be able to pass (width, height) here instead?
+    rf = RubiksFinder(S1, S2)
+
+    while True:
+        frame = cv.QueryFrame(capture)
+
+        if not frame:
+            cv.WaitKey(0)
+            break
+
+        rf.analyze_frame(frame)
+
+        if not rf.process_keyboard_input():
+            break
 
     cv.DestroyWindow("Fig")
+
+
+if __name__ == '__main__':
+    '''
+    Notes on resolutions
+    640x480  : what this program used originally
+    800x600  : highest I can use so far that works smoothly...this is the default
+    1024x768 : works but takes a second to get going
+    1280x720 : max for my camera, takes too much cpu
+    '''
+    logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(levelname)7s %(filename)12s: %(message)s')
+    parser = argparse.ArgumentParser("Find a Rubiks cube in an image or video feed")
+    parser.add_argument("--width", default=800, type=int)
+    parser.add_argument("--height", default=600, type=int)
+    parser.add_argument("-f", "--filename", type=str)
+
+    args = parser.parse_args()
+    log = logging.getLogger(__name__)
+
+    # Color the errors and warnings in red
+    logging.addLevelName(logging.ERROR, "\033[91m  %s\033[0m" % logging.getLevelName(logging.ERROR))
+    logging.addLevelName(logging.WARNING, "\033[91m%s\033[0m" % logging.getLevelName(logging.WARNING))
+
+    if args.filename:
+        analyze_file(args.filename)
+    else:
+        analyze_webcam(args.width, args.height)
