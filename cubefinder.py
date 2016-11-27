@@ -251,6 +251,60 @@ class RubiksFinder(object):
                        (0, 255, 255),   # yellow
                        (255, 255, 255)] # white
 
+    def analyze_frame(self, frame):
+        cv.Resize(frame, self.sg)
+        # cv.EqualizeHist(val, val)
+        # cv.Merge(hue,sat,val,None,sg2)
+        # cv.CvtColor(sg2,sg,cv.CV_HSV2RGB)
+        cv.Copy(self.sg, self.sgc)
+        cv.CvtColor(self.sg, self.grey, cv.CV_RGB2GRAY)
+        # cv.EqualizeHist(grey,grey)
+
+        # tracking mode
+        if self.tracking:
+            self.verify_still_tracking()
+
+        # detection mode
+        if not self.tracking:
+            self.detect()
+
+        if self.tracking:
+            # we are in tracking mode, we need to fill in pt[] array
+            # calculate the pt array for drawing from features
+            # for p in features:
+            #    cv.Circle(sg, p, 3, (255,255,255),-1)
+            p = self.features[0]
+            p1 = self.features[1]
+            p2 = self.features[2]
+
+            v1 = (p1[0] - p[0], p1[1] - p[1])
+            v2 = (p2[0] - p[0], p2[1] - p[1])
+
+            self.pt = [(p[0] - v1[0] - v2[0], p[1] - v1[1] - v2[1]),
+                       (p[0] + 2 * v2[0] - v1[0], p[1] + 2 * v2[1] - v1[1]),
+                       (p[0] + 2 * v1[0] - v2[0], p[1] + 2 * v1[1] - v2[1])]
+
+            self.prevface = [self.pt[0], self.pt[1], self.pt[2]]
+
+        # use pt[] array to do drawing
+        if (self.detected or self.undetectednum < 1) and self.dodetection:
+            self.draw_circles_and_lines()
+
+        # draw faces of the extracted cubes (hit the spacebar to extract
+        # the face of the currently detected cube face)
+        self.draw_extracted_cube_faces()
+
+        self.lastdetected = len(self.li)
+        # swapping for LK
+        self.prev_grey, self.grey = self.grey, self.prev_grey
+        self.prev_pyramid, self.pyramid = self.pyramid, self.prev_pyramid
+
+        # draw img
+        # cv.CvtColor(sg,sg2,cv.CV_RGB2HSV)
+        # cv.Split(sg2, hue, sat, val, None)
+        # cv.Smooth(sg,sg,cv.CV_GAUSSIAN, 5)
+        cv.ShowImage("Fig", self.sg)
+
     def verify_still_tracking(self):
         self.detected = 2
 
@@ -542,6 +596,7 @@ class RubiksFinder(object):
                     self.succ += 1
                     self.pt = self.prevface
                     self.detected = 1
+                    log.info("detected %d, succ %d" % (self.detected, self.succ))
 
             else:
                 self.succ = 0
@@ -795,60 +850,6 @@ class RubiksFinder(object):
 
         self.didassignments = True
 
-    def analyze_frame(self, frame):
-        cv.Resize(frame, self.sg)
-        # cv.EqualizeHist(val, val)
-        # cv.Merge(hue,sat,val,None,sg2)
-        # cv.CvtColor(sg2,sg,cv.CV_HSV2RGB)
-        cv.Copy(self.sg, self.sgc)
-        cv.CvtColor(self.sg, self.grey, cv.CV_RGB2GRAY)
-        # cv.EqualizeHist(grey,grey)
-
-        # tracking mode
-        if self.tracking:
-            self.verify_still_tracking()
-
-        # detection mode
-        if not self.tracking:
-            self.detect()
-
-        if self.tracking:
-            # we are in tracking mode, we need to fill in pt[] array
-            # calculate the pt array for drawing from features
-            # for p in features:
-            #    cv.Circle(sg, p, 3, (255,255,255),-1)
-            p = self.features[0]
-            p1 = self.features[1]
-            p2 = self.features[2]
-
-            v1 = (p1[0] - p[0], p1[1] - p[1])
-            v2 = (p2[0] - p[0], p2[1] - p[1])
-
-            self.pt = [(p[0] - v1[0] - v2[0], p[1] - v1[1] - v2[1]),
-                       (p[0] + 2 * v2[0] - v1[0], p[1] + 2 * v2[1] - v1[1]),
-                       (p[0] + 2 * v1[0] - v2[0], p[1] + 2 * v1[1] - v2[1])]
-
-            self.prevface = [self.pt[0], self.pt[1], self.pt[2]]
-
-        # use pt[] array to do drawing
-        if (self.detected or self.undetectednum < 1) and self.dodetection:
-            self.draw_circles_and_lines()
-
-        # draw faces of the extracted cubes (hit the spacebar to extract
-        # the face of the currently detected cube face)
-        self.draw_extracted_cube_faces()
-
-        self.lastdetected = len(self.li)
-        # swapping for LK
-        self.prev_grey, self.grey = self.grey, self.prev_grey
-        self.prev_pyramid, self.pyramid = self.pyramid, self.prev_pyramid
-
-        # draw img
-        # cv.CvtColor(sg,sg2,cv.CV_RGB2HSV)
-        # cv.Split(sg2, hue, sat, val, None)
-        # cv.Smooth(sg,sg,cv.CV_GAUSSIAN, 5)
-        cv.ShowImage("Fig", self.sg)
-
     def process_keyboard_input(self):
         c = cv.WaitKey(10) % 0x100
 
@@ -917,15 +918,23 @@ class RubiksFinder(object):
 
 
 def analyze_file(filename):
-    frame = cv.LoadImage(filename)
-    (S1, S2) = cv.GetSize(frame)
+    img = cv.LoadImage(filename)
+    # raw_input('Paused')
+
+    (S1, S2) = cv.GetSize(img)
     rf = RubiksFinder(S1, S2)
-    rf.analyze_frame(frame)
 
     cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
     cv.ResizeWindow("Fig", rf.width, rf.height)
 
-    raw_input('Paused')
+    for x in xrange(10):
+        log.info("x: %s" % x)
+        rf.analyze_frame(img)
+
+        if rf.tracking or True:
+            cv.ShowImage('foobar', img)
+            cv.WaitKey(0)
+
     cv.DestroyWindow("Fig")
 
 
@@ -957,9 +966,11 @@ def analyze_webcam(width, height):
     cv.ResizeWindow("Fig", width, height)
 
     frame = cv.QueryFrame(capture)
-    S1, S2 = cv.GetSize(frame)
+
     # dwalton should be able to pass (width, height) here instead?
-    rf = RubiksFinder(S1, S2)
+    # S1, S2 = cv.GetSize(frame)
+    # rf = RubiksFinder(S1, S2)
+    rf = RubiksFinder(width, height)
 
     while True:
         frame = cv.QueryFrame(capture)
