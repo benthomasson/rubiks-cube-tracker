@@ -2,16 +2,15 @@
 
 import argparse
 import cv
+import cv2
 import json
 import logging
+import os
 import sys
-from random import uniform
-from time import sleep
 from math import sin, cos, pi, atan2, sqrt
 from numpy import matrix
-from time import time
-from random import randrange
 from pprint import pformat
+from time import sleep
 
 log = logging.getLogger(__name__)
 
@@ -363,6 +362,7 @@ class RubiksFinder(object):
             self.THR = max(2, self.THR - 1)
 
         self.li = cv.HoughLines2(self.d2, cv.CreateMemStorage(), cv.CV_HOUGH_PROBABILISTIC, 1, 3.1415926 / 45, self.THR, 10, 5)
+        # self.li = cv2.HoughLinesP(numpy.asarray(self.d2, dtype="int32" ), 1, 3.1415926 / 45, self.THR, 10, 5)
 
         # store angles for later
         angs = []
@@ -906,6 +906,7 @@ class RubiksFinder(object):
                 log.info("didassignments is now %s" % self.didassignments)
 
             elif cc == 's':
+                from time import time
                 log.info("save image")
                 cv.SaveImage(repr(time()) + ".jpg", self.sgc)
 
@@ -917,7 +918,14 @@ def analyze_file(filename):
     Assuming filename is a png that contains a rubiks cube, return
     the RGB values for all 9 squares
     """
-    img = cv.LoadImage(filename)
+    for x in range(10):
+        try:
+            img = cv.LoadImage(filename)
+            break
+        except IOError as e:
+            sleep(1)
+    else:
+        raise e
 
     (S1, S2) = cv.GetSize(img)
     rf = RubiksFinder(S1, S2)
@@ -934,7 +942,7 @@ def analyze_file(filename):
         rf.analyze_frame(img)
 
         # we can "track" (find the cube in the pic) but it takes ~30 attempts...why ~30?
-        log.info("analyze_frame %d/%d: tracking %s" % (x, ATTEMPTS-1, rf.tracking))
+        log.info("analyze_frame %d/%d: tracking %s, THR %s" % (x, ATTEMPTS-1, rf.tracking, rf.THR))
 
         if rf.tracking:
             # log.warning("analyze_frame selected %s\ncolors\n%s\n\nhsvs\n%s\n\n" %
@@ -1024,6 +1032,7 @@ if __name__ == '__main__':
     parser.add_argument("--width", default=352, type=int)
     parser.add_argument("--height", default=240, type=int)
     parser.add_argument("-f", "--filename", type=str)
+    parser.add_argument("-d", "--daemon", action='store_true')
 
     args = parser.parse_args()
     log = logging.getLogger(__name__)
@@ -1035,5 +1044,19 @@ if __name__ == '__main__':
     if args.filename:
         rgb_all_squares = analyze_file(args.filename)
         print(json.dumps(rgb_all_squares, indent=4))
+
+    elif args.daemon:
+        log.info("running in daemon mode")
+        png_filename = '/tmp/rubiks_scan.png'
+        json_filename = '/tmp/rubiks_scan.json'
+
+        while True:
+            if os.path.exists(png_filename) and not os.path.exists(json_filename):
+                log.info("Analyze %s" % png_filename)
+                rgb_all_squares = analyze_file(png_filename)
+                with open(json_filename, 'w') as fh:
+                    json.dump(rgb_all_squares, fh)
+            sleep(0.1)
+
     else:
         analyze_webcam(args.width, args.height)
