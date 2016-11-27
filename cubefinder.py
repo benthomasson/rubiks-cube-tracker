@@ -666,7 +666,8 @@ class RubiksFinder(object):
         i = 1
         j = 5
         for k in range(9):
-            ep.append((self.p0[0] + i * self.v1[0] / 6.0 + j * self.v2[0] / 6.0, self.p0[1] + i * self.v1[1] / 6.0 + j * self.v2[1] / 6.0))
+            ep.append((self.p0[0] + i * self.v1[0] / 6.0 + j * self.v2[0] / 6.0,
+                       self.p0[1] + i * self.v1[1] / 6.0 + j * self.v2[1] / 6.0))
             i = i + 2
             if i == 7:
                 i = 1
@@ -709,8 +710,9 @@ class RubiksFinder(object):
                     cs.append(col)
                     hsvcs.append((hueavg[0], satavg[0]))
 
+        # dwalton - self.extract is checked here and above
         if self.extract:
-            self.extract = not self.extract
+            self.extract = False
             self.colors[self.selected] = cs
             self.hsvs[self.selected] = hsvcs
             self.selected = min(self.selected + 1, 5)
@@ -918,24 +920,47 @@ class RubiksFinder(object):
 
 
 def analyze_file(filename):
+    """
+    Assuming filename is a png that contains a rubiks cube, return
+    the RGB values for all 9 squares
+    """
     img = cv.LoadImage(filename)
-    # raw_input('Paused')
 
     (S1, S2) = cv.GetSize(img)
     rf = RubiksFinder(S1, S2)
 
     cv.NamedWindow("Fig", cv.CV_WINDOW_NORMAL)
     cv.ResizeWindow("Fig", rf.width, rf.height)
+    ATTEMPTS = 100
+    rf.extract = True
 
-    for x in xrange(10):
-        log.info("x: %s" % x)
+    for x in xrange(ATTEMPTS):
         rf.analyze_frame(img)
 
-        if rf.tracking or True:
-            cv.ShowImage('foobar', img)
-            cv.WaitKey(0)
+        # we can track but it takes 33 attempts (why 33?)
+        log.info("analyze_frame %d/%d: tracking %s" % (x, ATTEMPTS-1, rf.tracking))
+
+        if rf.tracking:
+            # log.warning("analyze_frame selected %s\ncolors\n%s\n\nhsvs\n%s\n\n" %
+            #          (rf.selected,
+            #           pformat(rf.colors),
+            #           pformat(rf.hsvs)))
+
+            # cv.ShowImage('foobar', img)
+            # cv.WaitKey(0)
+            break
+    else:
+        raise Exception("Could not find the cube in %s" % filename)
 
     cv.DestroyWindow("Fig")
+    colors = rf.colors[0]
+    colors_final = []
+
+    for (red, green, blue, _) in colors:
+        # dwalton double check that it is RGB and not some other funky order
+        colors_final.append((int(red), int(green), int(blue)))
+
+    return colors_final
 
 
 def analyze_webcam(width, height):
@@ -967,7 +992,7 @@ def analyze_webcam(width, height):
 
     frame = cv.QueryFrame(capture)
 
-    # dwalton should be able to pass (width, height) here instead?
+    # should be able to pass (width, height) here instead?
     # S1, S2 = cv.GetSize(frame)
     # rf = RubiksFinder(S1, S2)
     rf = RubiksFinder(width, height)
@@ -1010,6 +1035,6 @@ if __name__ == '__main__':
     logging.addLevelName(logging.WARNING, "\033[91m%s\033[0m" % logging.getLevelName(logging.WARNING))
 
     if args.filename:
-        analyze_file(args.filename)
+        print analyze_file(args.filename)
     else:
         analyze_webcam(args.width, args.height)
